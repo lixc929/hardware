@@ -19,6 +19,11 @@
 #define CH585_SCAN_FRAME_TYPE_KEY_STATE 0x10U
 #define CH585_SCAN_CMD_MAGIC         0x524BU
 #define CH585_SCAN_CMD_GET_STATE     0x01U
+#define CH585_SCAN_CMD_GET_DEBUG     0x02U
+#define CH585_SCAN_CMD_GET_CONFIG    0x03U
+#define CH585_SCAN_CMD_SET_CONFIG    0x04U
+#define CH585_SCAN_CMD_CALIBRATE_KEY 0x05U
+#define CH585_SCAN_CMD_CALIBRATE_ALL 0x06U
 #define CH585_SCAN_SHORT_FRAME_MAGIC 0xD7U
 #define CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE 0x11U
 #define CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG 0x12U
@@ -34,6 +39,18 @@
 #define CH585_SCAN_SHORT_DEBUG_FLAG_RT_ARMED (1U << 1)
 #define CH585_SCAN_REQ0              'K'
 #define CH585_SCAN_REQ1              'R'
+#define CH585_SCAN_CFG_RELEASED_ADC       0x01U
+#define CH585_SCAN_CFG_PRESSED_ADC        0x02U
+#define CH585_SCAN_CFG_MIN_ADC            0x03U
+#define CH585_SCAN_CFG_MAX_ADC            0x04U
+#define CH585_SCAN_CFG_PRESS_POSITION     0x05U
+#define CH585_SCAN_CFG_RELEASE_POSITION   0x06U
+#define CH585_SCAN_CFG_RT_PRESS_DELTA     0x07U
+#define CH585_SCAN_CFG_RT_RELEASE_DELTA   0x08U
+#define CH585_SCAN_CFG_FILTER_SHIFT       0x09U
+#define CH585_SCAN_CFG_RT_ENABLE          0x0AU
+#define CH585_SCAN_CFG_VALID              0x0BU
+#define CH585_SCAN_CFG_GLOBAL_KEY_ID      0x0CU
 #define CH585_SIM_RELEASED_ADC       1000U
 #define CH585_SIM_PRESSED_ADC        3000U
 #define CH585_KEY_DEFAULT_MIN_ADC    0U
@@ -157,8 +174,12 @@ typedef struct __attribute__((packed))
     uint8_t cmd;
     uint8_t host_seq;
     uint8_t ack_seq;
-    uint8_t flags;
-    uint8_t reserved;
+    uint8_t target_key;
+    uint8_t param_id;
+    uint16_t value;
+    uint16_t flags;
+    uint16_t aux;
+    uint8_t reserved[2];
     uint16_t crc16;
 } ch585_scan_cmd_short_t;
 
@@ -275,6 +296,143 @@ static const ch585_key_config_t *key_config(uint8_t key_id)
 
     return &g_key_config[key_id];
 }
+
+#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
+static void key_runtime_reset(uint8_t key_id)
+{
+    const ch585_key_config_t *cfg = key_config(key_id);
+
+    if (key_id >= CH585_SCAN_KEYS_PER_SOURCE)
+    {
+        return;
+    }
+
+    g_key_down[key_id] = 0U;
+    g_key_filter_valid[key_id] = 0U;
+    g_key_rt_armed[key_id] = 0U;
+    g_key_raw_adc[key_id] = cfg->released_adc;
+    g_key_filtered_adc[key_id] = cfg->released_adc;
+    g_key_filtered_q8[key_id] = (uint32_t)cfg->released_adc << 8;
+    g_key_position_pm[key_id] = 0U;
+    g_key_peak_pm[key_id] = 0U;
+    g_key_valley_pm[key_id] = 0U;
+}
+
+static uint8_t scan_cmd_id_is_supported(uint8_t cmd)
+{
+    switch (cmd)
+    {
+    case CH585_SCAN_CMD_GET_STATE:
+    case CH585_SCAN_CMD_GET_DEBUG:
+    case CH585_SCAN_CMD_GET_CONFIG:
+    case CH585_SCAN_CMD_SET_CONFIG:
+    case CH585_SCAN_CMD_CALIBRATE_KEY:
+    case CH585_SCAN_CMD_CALIBRATE_ALL:
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+
+static uint8_t key_config_set_u16(uint8_t key_id, uint8_t param_id, uint16_t value)
+{
+    ch585_key_config_t *cfg;
+
+    if (key_id >= CH585_SCAN_KEYS_PER_SOURCE)
+    {
+        return 0U;
+    }
+
+    cfg = &g_key_config[key_id];
+
+    switch (param_id)
+    {
+    case CH585_SCAN_CFG_RELEASED_ADC:
+        cfg->released_adc = value;
+        break;
+    case CH585_SCAN_CFG_PRESSED_ADC:
+        cfg->pressed_adc = value;
+        break;
+    case CH585_SCAN_CFG_MIN_ADC:
+        cfg->min_adc = value;
+        break;
+    case CH585_SCAN_CFG_MAX_ADC:
+        cfg->max_adc = value;
+        break;
+    case CH585_SCAN_CFG_PRESS_POSITION:
+        cfg->press_position_pm = (value > 1000U) ? 1000U : value;
+        break;
+    case CH585_SCAN_CFG_RELEASE_POSITION:
+        cfg->release_position_pm = (value > 1000U) ? 1000U : value;
+        break;
+    case CH585_SCAN_CFG_RT_PRESS_DELTA:
+        cfg->rt_press_delta_pm = (value > 1000U) ? 1000U : value;
+        break;
+    case CH585_SCAN_CFG_RT_RELEASE_DELTA:
+        cfg->rt_release_delta_pm = (value > 1000U) ? 1000U : value;
+        break;
+    case CH585_SCAN_CFG_FILTER_SHIFT:
+        cfg->filter_shift = (value > 15U) ? 15U : (uint8_t)value;
+        break;
+    case CH585_SCAN_CFG_RT_ENABLE:
+        cfg->rt_enable = (value != 0U) ? 1U : 0U;
+        break;
+    case CH585_SCAN_CFG_VALID:
+        cfg->valid = (value != 0U) ? 1U : 0U;
+        break;
+    case CH585_SCAN_CFG_GLOBAL_KEY_ID:
+        cfg->global_key_id = value;
+        break;
+    default:
+        return 0U;
+    }
+
+    key_runtime_reset(key_id);
+    return 1U;
+}
+
+static uint16_t scan_cmd_apply(const ch585_scan_wire_cmd_t *cmd)
+{
+    if (cmd == NULL)
+    {
+        return CH585_SCAN_FLAG_CMD_ERROR;
+    }
+
+    switch (cmd->cmd)
+    {
+    case CH585_SCAN_CMD_GET_STATE:
+    case CH585_SCAN_CMD_GET_DEBUG:
+    case CH585_SCAN_CMD_GET_CONFIG:
+        return 0U;
+    case CH585_SCAN_CMD_SET_CONFIG:
+#if CH585_USE_SHORT_FRAME
+        if (key_config_set_u16(cmd->target_key, cmd->param_id, cmd->value) == 0U)
+        {
+            return CH585_SCAN_FLAG_CMD_ERROR;
+        }
+        return 0U;
+#else
+        return CH585_SCAN_FLAG_CMD_ERROR;
+#endif
+    case CH585_SCAN_CMD_CALIBRATE_KEY:
+#if CH585_USE_SHORT_FRAME
+        if (cmd->target_key >= CH585_SCAN_KEYS_PER_SOURCE)
+        {
+            return CH585_SCAN_FLAG_CMD_ERROR;
+        }
+        key_runtime_reset(cmd->target_key);
+        return 0U;
+#else
+        return CH585_SCAN_FLAG_CMD_ERROR;
+#endif
+    case CH585_SCAN_CMD_CALIBRATE_ALL:
+        key_config_init_defaults();
+        return 0U;
+    default:
+        return CH585_SCAN_FLAG_CMD_ERROR;
+    }
+}
+#endif
 
 static uint16_t sim_clamp_adc(int32_t value)
 {
@@ -507,7 +665,7 @@ static uint8_t scan_cmd_is_valid(const ch585_scan_wire_cmd_t *cmd)
     {
         return 0U;
     }
-    if (cmd->cmd != CH585_SCAN_CMD_GET_STATE)
+    if (scan_cmd_id_is_supported(cmd->cmd) == 0U)
     {
         return 0U;
     }
@@ -520,7 +678,7 @@ static uint8_t scan_cmd_is_valid(const ch585_scan_wire_cmd_t *cmd)
     {
         return 0U;
     }
-    if (cmd->cmd != CH585_SCAN_CMD_GET_STATE)
+    if (scan_cmd_id_is_supported(cmd->cmd) == 0U)
     {
         return 0U;
     }
@@ -851,7 +1009,6 @@ int main(void)
     SPI0_DataMode(Mode0_HighBitINFront);
 
 #if CH585_USE_PIPELINE_SHORT && CH585_USE_SHORT_FRAME
-    (void)frame_flags;
     build_scan_frame(seq, CH585_SCAN_FLAG_READY, 0xFFFFU);
     while (1)
     {
@@ -869,7 +1026,8 @@ int main(void)
         {
             ack_host_seq = g_cmd.host_seq;
             seq++;
-            build_scan_frame(seq, CH585_SCAN_FLAG_READY, ack_host_seq);
+            frame_flags = (uint16_t)(CH585_SCAN_FLAG_READY | scan_cmd_apply(&g_cmd));
+            build_scan_frame(seq, frame_flags, ack_host_seq);
         }
     }
 #elif CH585_USE_REQUEST_ONLY_SHORT && CH585_USE_SHORT_FRAME
@@ -944,6 +1102,7 @@ int main(void)
         if (scan_cmd_is_valid(&g_cmd) != 0U)
         {
             ack_host_seq = g_cmd.host_seq;
+            frame_flags |= scan_cmd_apply(&g_cmd);
         }
         else
         {

@@ -20,6 +20,11 @@
 #define CH585_SCAN_FRAME_TYPE_KEY_STATE 0x10U
 #define CH585_SCAN_CMD_MAGIC         0x524BU /* Wire bytes: 4b 52, ASCII-ish "KR". */
 #define CH585_SCAN_CMD_GET_STATE     0x01U
+#define CH585_SCAN_CMD_GET_DEBUG     0x02U
+#define CH585_SCAN_CMD_GET_CONFIG    0x03U
+#define CH585_SCAN_CMD_SET_CONFIG    0x04U
+#define CH585_SCAN_CMD_CALIBRATE_KEY 0x05U
+#define CH585_SCAN_CMD_CALIBRATE_ALL 0x06U
 #define CH585_SCAN_SHORT_FRAME_MAGIC 0xD7U
 #define CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE 0x11U
 #define CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG 0x12U
@@ -46,6 +51,19 @@
 #define CH585_SCAN_SHORT_FLAG_READY     (1U << 7)
 #define CH585_SCAN_SHORT_DEBUG_FLAG_DOWN     (1U << 0)
 #define CH585_SCAN_SHORT_DEBUG_FLAG_RT_ARMED (1U << 1)
+
+#define CH585_SCAN_CFG_RELEASED_ADC       0x01U
+#define CH585_SCAN_CFG_PRESSED_ADC        0x02U
+#define CH585_SCAN_CFG_MIN_ADC            0x03U
+#define CH585_SCAN_CFG_MAX_ADC            0x04U
+#define CH585_SCAN_CFG_PRESS_POSITION     0x05U
+#define CH585_SCAN_CFG_RELEASE_POSITION   0x06U
+#define CH585_SCAN_CFG_RT_PRESS_DELTA     0x07U
+#define CH585_SCAN_CFG_RT_RELEASE_DELTA   0x08U
+#define CH585_SCAN_CFG_FILTER_SHIFT       0x09U
+#define CH585_SCAN_CFG_RT_ENABLE          0x0AU
+#define CH585_SCAN_CFG_VALID              0x0BU
+#define CH585_SCAN_CFG_GLOBAL_KEY_ID      0x0CU
 
 typedef struct __attribute__((packed))
 {
@@ -106,8 +124,12 @@ typedef struct __attribute__((packed))
     uint8_t cmd;
     uint8_t host_seq;
     uint8_t ack_seq;
-    uint8_t flags;
-    uint8_t reserved;
+    uint8_t target_key;
+    uint8_t param_id;
+    uint16_t value;
+    uint16_t flags;
+    uint16_t aux;
+    uint8_t reserved[2];
     uint16_t crc16;
 } ch585_scan_cmd_short_t;
 
@@ -158,6 +180,10 @@ void ch585_spi_scan_dump_stats(void);
 const uint16_t *ch585_spi_scan_raw(void);
 const ch585_scan_source_stats_t *ch585_spi_scan_source_stats(uint8_t source_id);
 int ch585_spi_scan_source0_debug_status(ch585_scan_debug_status_t *out);
+int ch585_spi_scan_source0_queue_get_debug(uint8_t key_id);
+int ch585_spi_scan_source0_queue_get_config(uint8_t key_id, uint8_t param_id);
+int ch585_spi_scan_source0_queue_set_config(uint8_t key_id, uint8_t param_id, uint16_t value);
+int ch585_spi_scan_source0_queue_calibrate_key(uint8_t key_id, uint16_t flags);
 uint32_t ch585_spi_scan_source0_sck_khz_x10(void);
 uint16_t ch585_spi_scan_source0_prescaler(void);
 uint8_t ch585_spi_scan_source0_hsrx(void);

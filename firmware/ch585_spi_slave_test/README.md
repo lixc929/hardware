@@ -58,6 +58,28 @@ peak_pm
 crc16        CRC-CCITT over bytes before crc16
 ```
 
+H417 到 CH585 的低频命令原型同样使用 16B，和状态短帧等长：
+
+```text
+magic       0xA7
+cmd         0x01 GET_STATE
+            0x02 GET_DEBUG
+            0x03 GET_CONFIG
+            0x04 SET_CONFIG
+            0x05 CALIBRATE_KEY
+            0x06 CALIBRATE_ALL
+host_seq    H417 command seq
+ack_seq     H417 已收到的 CH585 seq
+target_key  本地 key id, 0..63
+param_id    配置项 id
+value       配置值
+flags       命令标志
+aux         预留辅助参数
+crc16       CRC-CCITT over bytes before crc16
+```
+
+当前 request-only 高速路径仍以 `KEY_STATE/KEY_DEBUG` 返回为准；命令结构和 `SET_CONFIG` 处理已经就绪，后续可以接入调试 shell、Vendor HID 或配置同步流程。
+
 当前 `Makefile` 默认：
 
 ```makefile

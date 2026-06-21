@@ -176,6 +176,14 @@ CALIBRATE_ALL
 - raw ADC、position、校准数据只走低频 debug/config。
 - 命令和响应都保留 CRC、seq、source_id。
 
+状态：
+
+- 初版 16B 命令结构已加入 H417 和 CH585 测试固件。
+- H417 侧已提供 source0 命令排队 API。
+- CH585 侧已能识别 `GET_STATE / GET_DEBUG / GET_CONFIG / SET_CONFIG / CALIBRATE_KEY / CALIBRATE_ALL`。
+- `SET_CONFIG` 已能修改 CH585 本地每键配置结构。
+- 默认高速状态链路仍保持 `KEY_STATE / KEY_DEBUG` 返回帧不变。
+
 ### P3: 接入 ADS7948 单通道
 
 先只让 CH585 读一个 ADS7948 固定通道，不接完整 MUX 扫描。
