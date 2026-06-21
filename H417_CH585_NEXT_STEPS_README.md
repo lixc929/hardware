@@ -1,6 +1,6 @@
 # H417 + CH585 SPI 下一步优化计划
 
-记录时间：2026-06-20
+记录时间：2026-06-21
 
 本文只记录当前 H417 和 CH585 通信调试的下一步工作，避免后续烧录和改线时忘记主线。
 
@@ -10,6 +10,10 @@
 - H417 使用 GPIO 控制 CH585 的 CS，不额外加硬件 READY 线。
 - CH585 使用 SPI0 从机。
 - 当前只接了一块 CH585，第二块后续再扩展。
+- 现在手头没有 ADS7948/ADC 板，因此真实 ADC/MUX 扫描先暂停。
+- CH585 测试固件已经能用模拟 ADC 进入本地按键算法，再输出 `down_bits[8]` 短帧。
+- H417 已切到 USBFS CDC 调试版，当前主要看 `COM5`；WCH-Link `COM4` 可以同时保留看心跳/辅助日志。
+- 杜邦线阶段 SPI 不继续硬拉 40MHz+，先使用当前稳定档，等 PCB 到后再重新做高速验证。
 - 当前通信是软件握手：
 
 ```text
@@ -18,6 +22,76 @@ CH585 校验命令
 CH585 返回 64 个按键的 0/1 状态 bitmap
 H417 校验 CRC / ack_seq / seq
 H417 再通过 USB/串口调试看结果
+```
+
+## 2026-06-21 无 ADC 阶段要做的事
+
+当前没有 ADC，下一步先把“可观测、可配置、可回退”的 CH585 前端算法框架做好。
+
+优先级：
+
+1. 保持当前链路稳定：
+
+```text
+CH585 模拟 ADC/本地算法
+  -> down_bits[8] 短帧
+  -> H417 SPI 拉取
+  -> USBFS COM5 打印 KS/SS/TR
+```
+
+验收标准：
+
+```text
+s0ok 持续增加
+s0fetch=0
+s0crc=0
+s0seq 不持续增加
+KS 前几个键能在 1000/3000 变化
+```
+
+2. 增加低频调试输出或调试帧，用来看 CH585 内部算法状态：
+
+```text
+key_id
+sim/raw_adc
+filtered_adc
+position 0..1000
+down
+rt_armed / peak / valley
+```
+
+高频正常帧仍然只发 `down_bits[8]`，调试信息低频输出，避免拖慢 SPI。
+
+3. 把 CH585 算法参数整理成结构，后续真实 ADC 到了直接复用：
+
+```text
+released_adc
+pressed_adc
+press_position
+release_position
+rt_press_delta
+rt_release_delta
+filter_shift
+rt_enable
+```
+
+4. 做 H417 -> CH585 配置命令雏形：
+
+```text
+GET_STATE       正常拉取键状态
+GET_DEBUG       低频读取某几个 key 的算法内部状态
+SET_CONFIG      下发触发点/RT/滤波参数
+GET_CONFIG      回读当前参数
+```
+
+5. 等 ADS7948/ADC 硬件到位后，再把模拟 ADC 替换成真实单通道 ADC：
+
+```text
+ADS7948 单通道
+  -> key0 状态
+  -> ADS7948 双通道
+  -> 单个 16:1 MUX
+  -> 4 lane / 64 键
 ```
 
 ## 当前帧格式
