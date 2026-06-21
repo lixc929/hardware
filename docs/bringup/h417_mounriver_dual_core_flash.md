@@ -7,7 +7,7 @@
 CH32H417 有两个核：
 
 - `V3F`：启动核，Flash 起始地址 `0x08000000`。它负责上电后先运行，并唤醒 V5F。
-- `V5F`：应用核，Flash 起始地址 `0x08010000`。我们现在写的 RT-Thread、USB2.0 HS CDC、CH585 SPI scan 骨架都在这里。
+- `V5F`：应用核，Flash 起始地址 `0x08010000`。我们现在写的 RT-Thread、USBFS CDC 调试、CH585 SPI scan 骨架都在这里。
 
 所以只烧 V5F 不够。只烧 `rtthread_ch32h417_v5f.hex` 时，V5F 可能不会被唤醒，串口也可能完全没输出。当前调试应同时准备这两个文件：
 
@@ -19,7 +19,7 @@ V5F:
 F:\嵌赛\hardware\rtthread_port\build\v5f\rtthread_ch32h417_v5f.hex
 ```
 
-当前调试分支里的 V3F 已改成最小启动核：上电后配置系统时钟、唤醒 V5F，然后空转。这样先保证 V5F 的 UART8 日志、RT-Thread 和 USBHS CDC 能稳定跑起来；USBSS 接管、ADC 扫描等 V3F 侧复杂逻辑后面再逐步加回。
+当前调试分支里的 V3F 已改成最小启动核：上电后配置系统时钟、唤醒 V5F，然后空转。这样先保证 V5F 的 UART8 日志、RT-Thread 和 USBFS CDC 能稳定跑起来；USBSS 接管、ADC 扫描等 V3F 侧复杂逻辑后面再逐步加回。
 
 ## 编译当前工程
 
@@ -197,7 +197,7 @@ Hello, RT-Thread on CH32H417 V5F!
 CH585 SPI scan ingest: fake source backend enabled
 CH585 SPI frame size=142 bytes, sources=2, keys/source=64
 Initializing USB2.0 CDC loopback; USBSS owned by V3F official stack...
-USBHS CDC init ok
+USBFS CDC init ok
 Dual CDC init completed.
 rtthread heartbeat ...
 CH585 scan poll=...
@@ -205,15 +205,15 @@ CH585 scan poll=...
   src1 ok=... fetch=0 crc=0 seq_drop=0 ...
 ```
 
-其中 `USBSS owned by V3F official stack` 是 V5F 当前残留的提示语。当前 V3F 实际是最小唤醒版，所以调试时优先看 `early-uart up`、`Hello, RT-Thread`、`USBHS CDC init ok` 和 `CH585 scan poll`。
+其中 `USBSS owned by V3F official stack` 是 V5F 当前残留的提示语。当前 V3F 实际是最小唤醒版，所以调试时优先看 `early-uart up`、`Hello, RT-Thread`、`USBFS CDC init ok` 和 `CH585 scan poll`。
 
-PC 端 USBHS 口还应枚举出一个 CDC 串口，产品字符串类似：
+PC 端 USBFS 口还应枚举出一个 CDC 串口，Windows 上可能显示为：
 
 ```text
-CH32H417 USBHS CDC
+USB 串行设备 (COM5)
 ```
 
-这个 USBHS CDC 当前是 loopback，打开后发什么回显什么；调试日志仍然主要走 UART8。
+这个 USBFS CDC 当前用于输出 `KD`、`KS`、`SS`、`TR` 等调试行；WCH-Link 串口仍可同时看 RT-Thread heartbeat 和详细 dump。
 
 ## 常见问题
 

@@ -134,9 +134,9 @@ GET_CONFIG
 SET_CONFIG
 ```
 
-4. Move the CH585 test firmware into the `hardware` repository so teammates can reproduce the CH585 side.
+4. Keep the CH585 test firmware in the `hardware` repository so teammates can reproduce the CH585 side.
 
-Suggested location:
+Current location:
 
 ```text
 firmware/ch585_spi_slave_test/

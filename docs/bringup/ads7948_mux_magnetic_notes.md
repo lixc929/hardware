@@ -22,9 +22,10 @@
    - 目前是原型: 默认 released=1000, pressed=3000, press=450pm, release=350pm。
 
 3. CH585 测试工程里的临时按下判断:
-   - `../CH585M_SPI_SLAVE_TEST/src/main.c`
+   - `firmware/ch585_spi_slave_test/src/main.c`
    - 里面有 `update_key_state_from_adc()` 这样的阈值滞回逻辑。
-   - 但默认 `CH585_FAST_SIM_FRAME=1` 时会直接发 pattern bits, 会绕过 ADC 阈值判断。
+   - 默认 `CH585_FAST_SIM_FRAME=0`, 会走模拟 ADC -> CH585 本地按键算法 -> `down_bits[8]`。
+   - `CH585_FAST_SIM_FRAME=1` 仍可临时回退到 pattern bits, 会绕过 ADC 阈值判断。
    - 如果要临时用 CH585 做 down_bits, 需要让 CH585 采样层产出 down_bits, 再塞进当前短帧。
 
 4. ADS7948:

@@ -81,13 +81,17 @@ COM5 = H417 USBFS CDC，看 KS / SS / TR / KD
 COM4 = WCH-Link SERIAL，看 rtthread heartbeat 和详细 dump
 ```
 
-本次新增的 CH585 测试工程仍在仓库外：
+CH585 测试工程已经整理进仓库：
 
 ```text
-F:\嵌赛\CH585M_SPI_SLAVE_TEST
+F:\嵌赛\hardware\firmware\ch585_spi_slave_test
 ```
 
-如果团队希望这部分也进入 PR，需要后续把 CH585 测试工程整理进 `hardware/firmware/` 或约定的固件目录。
+默认编译产物：
+
+```text
+F:\嵌赛\hardware\firmware\ch585_spi_slave_test\build\ch585m_spi_slave_test.hex
+```
 
 ## 当前结论
 
@@ -307,7 +311,7 @@ F:\嵌赛\hardware\rtthread_port\build\v5f\rtthread_ch32h417_v5f.hex
 CH585M 当前测试固件：
 
 ```text
-F:\嵌赛\CH585M_SPI_SLAVE_TEST\build\ch585m_spi_slave_test.hex
+F:\嵌赛\hardware\firmware\ch585_spi_slave_test\build\ch585m_spi_slave_test.hex
 ```
 
 注意：CH585M 需要手动用下载器烧录；H417 可以通过当前脚本和 WCH-Link 烧录。
@@ -325,7 +329,7 @@ F:\嵌赛\hardware\rtthread_port\applications\ch585_spi_scan.h
 CH585M：
 
 ```text
-F:\嵌赛\CH585M_SPI_SLAVE_TEST\src\main.c
+F:\嵌赛\hardware\firmware\ch585_spi_slave_test\src\main.c
 ```
 
 ## 下一步建议

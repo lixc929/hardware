@@ -4,6 +4,16 @@
 
 > **状态**: Phase 1 早期开发中 —— RT-Thread 已移植，USB3.0 HID 复合设备已跑通
 
+## 文档入口
+
+当前文档已经统一放到 `docs/` 下：
+
+- [文档总索引](docs/README.md)
+- [H417 + CH585 当前调试入口](docs/bringup/README.md)
+- [当前 H417 + CH585 调试状态](docs/bringup/h417_ch585_current_debug.md)
+- [H417 + CH585 下一步计划](docs/bringup/h417_ch585_next_steps.md)
+- [项目结构与职责划分](docs/architecture/project_architecture.md)
+
 ---
 
 ## 硬件架构

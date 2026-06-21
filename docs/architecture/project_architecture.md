@@ -60,7 +60,7 @@ H417 是主控和 USB 上报端：
 - 校验 CH585M 帧：magic/version/source/ack/flags/CRC。
 - 合并 2 x 64 键为全键盘状态。
 - 做跨 CH585 的全局功能：SOCD、组合键、宏、层、配置同步。
-- 通过 USBHS 做正式 HID / Vendor HID；调试阶段用 USBHS CDC 打印日志。
+- 通过 USBHS 做正式 HID / Vendor HID；当前调试阶段用 USBFS CDC 打印日志。
 - 把 PC 端配置同步给两个 CH585M。
 
 H417 不再作为正常运行时的最终磁轴算法主处理器。
@@ -157,7 +157,7 @@ SET_TRIGGER_CONFIG
 
 ## 6. USB 规划
 
-当前 H417 USBHS CDC 已经能枚举并输出调试文本。正式产品路径应逐步切到：
+当前 H417 USBFS CDC 已经能枚举并输出调试文本。正式产品路径应逐步切到：
 
 ```text
 USBHS HID / Vendor HID
@@ -167,21 +167,21 @@ USBHS HID / Vendor HID
 
 - HID：正式键盘输入，上报频率优先保证。
 - Vendor HID：配置、标定、状态读取。
-- CDC：仅调试阶段使用，后续应降频或可关闭。
+- CDC：仅调试阶段使用，当前走 USBFS COM5，后续应降频或可关闭。
 
-当前调试观测里，USBHS CDC 在 Windows 上出现过 `USB Serial Device (COM7)`，说明 H417 USBHS 硬件通路和当前 CDC 固件路径已经打通。
+当前主要调试通道已经切到 USBFS CDC，Windows 上枚举为 `USB 串行设备 (COM5)`。USBHS/正式 HID 仍是后续产品路径。
 
 ## 7. 当前已经验证的状态
 
 截至 2026-06-21：
 
 - H417 双核烧录可用；当前稳定方法是 V5F/V3F core both 一次烧录。
-- H417 USBHS CDC 已能枚举，PC 可读到 `KS`、`SS`、`TR` 等调试行。
+- H417 USBFS CDC 已能枚举，PC 可读到 `KD`、`KS`、`SS`、`TR` 等调试行。
 - H417 与一块 CH585M 的硬件 SPI2 + GPIO CS 链路已跑通。
 - 当前只实接一块 CH585M，第二块 CH585M 仍未接入；H417 侧 source1 仍可用假数据路径补齐调试。
 - 当前 SPI 自动训练显示约 16 MHz 稳定，19.2 MHz 附近已经明显不稳，24 MHz 以上基本失败。
 - 杜邦线阶段暂时把约 16 MHz 作为稳定工程档位，不继续强行拉到 40 MHz+。40 MHz 以上目标等 PCB 到后，再结合示波器/逻辑分析仪看 SCK/MISO 建立时间、线长、地线、驱动能力、采样相位、共享 MISO 三态等硬件问题。
-- `../CH585M_SPI_SLAVE_TEST` 已改为默认从模拟 ADC 进入 CH585 本地键轴算法，再输出 `down_bits[8]` 短帧；`CH585_FAST_SIM_FRAME=1` 仍可回退到旧 pattern。
+- `firmware/ch585_spi_slave_test` 已加入仓库，默认从模拟 ADC 进入 CH585 本地键轴算法，再输出 `KEY_STATE/down_bits[8]` 和低频 `KEY_DEBUG` 短帧；`CH585_FAST_SIM_FRAME=1` 仍可回退到旧 pattern。
 - `firmware/ch585_frontend/ads7948.*` 和 `ch585_ads7948_mux_scan.*` 已有独立原型代码，但尚未接入 CH585 正式工程。
 - `firmware/common/magnetic_key_engine.*` 可作为磁轴算法参考/仿真原型，但当前产品架构里最终磁轴算法应迁移到 CH585 侧。
 
@@ -191,23 +191,23 @@ H417 侧：
 
 | 文件 | 当前作用 |
 | --- | --- |
-| `rtthread_port/applications/main.c` | RT-Thread 主循环，SPI/USBHS CDC 调试输出入口 |
+| `rtthread_port/applications/main.c` | RT-Thread 主循环，SPI/USBFS CDC 调试输出入口 |
 | `rtthread_port/applications/ch585_spi_scan.c/.h` | H417 拉取 CH585 短帧、训练 SPI、合并调试数据 |
 | `rtthread_port/applications/usb_cdc_dual.c` | USBFS/USBHS CDC 调试输出 |
-| `rtthread_port/tools/read_usbhs_cdc.ps1` | PC 侧读取 USBHS CDC 日志 |
+| `rtthread_port/tools/read_usbhs_cdc.ps1` | PC 侧读取 CDC 串口日志 |
 
 CH585 侧：
 
 | 文件 | 当前作用 |
 | --- | --- |
-| `../CH585M_SPI_SLAVE_TEST/src/main.c` | CH585 SPI slave 测试工程，当前仍有模拟 pattern/临时按键判断路径 |
+| `firmware/ch585_spi_slave_test/src/main.c` | CH585 SPI slave 测试工程，当前模拟 ADC、本地按键算法、`KEY_STATE` 和 `KEY_DEBUG` 都在这里 |
 | `firmware/ch585_frontend/ads7948.c/.h` | ADS7948 保守读驱动原型 |
 | `firmware/ch585_frontend/ch585_ads7948_mux_scan.c/.h` | CH585 侧 ADS7948 + MUX 扫描层原型 |
 | `firmware/common/magnetic_key_engine.c/.h` | 磁轴算法参考模块，后续应向 CH585 侧迁移 |
 
 ## 9. 后续优先级
 
-1. 用 `../CH585M_SPI_SLAVE_TEST` 验证模拟 ADC -> CH585 本地算法 -> `down_bits[8]` -> H417 USBHS `KS/SS` 这条链路。
+1. 用 `firmware/ch585_spi_slave_test` 持续验证模拟 ADC -> CH585 本地算法 -> `KEY_STATE/KEY_DEBUG` -> H417 USBFS `KD/KS/SS` 这条链路。
 2. 在 CH585 上接入 ADS7948 单通道读取，先确认固定通道 raw code 稳定。
 3. 接入 CH585 的 MUX 扫描，确认 64 键 raw code 和 lane/key map。
 4. 把完整磁轴算法迁移到 CH585：滤波、标定、position、普通触发、RT、滞回。
