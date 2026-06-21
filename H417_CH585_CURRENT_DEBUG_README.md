@@ -2,6 +2,93 @@
 
 本文记录当前已经验证过的 H417 与单块 CH585M 调试状态，方便后续和队友对齐。
 
+## 2026-06-21 最新状态
+
+当前实际调试链路已经切到：
+
+```text
+CH585M 测试固件
+  -> 本地模拟 ADC
+  -> CH585 本地滤波/位置计算/普通触发/RT 判断
+  -> SPI0 从机输出 16B 短帧
+  -> H417 硬件 SPI2 + GPIO CS 主机读取
+  -> H417 只合并 2 x 64 键状态，调试阶段通过 USBFS CDC 输出
+```
+
+H417 侧现在使用硬件 SPI2，不再使用最早的 PD2/PD3/PD4 软件 SPI 调试线。当前第一块 CH585 接线：
+
+| H417 | CH585M | 方向 | 作用 |
+| --- | --- | --- | --- |
+| PB12 | PA12 | H417 -> CH585 | SPI2 GPIO CS0，低有效 |
+| PB13 | PA13 | H417 -> CH585 | SPI2 SCK |
+| PC1 | PA14 | H417 -> CH585 | SPI2 MOSI |
+| PC2 | PA15 | CH585 -> H417 | SPI2 MISO |
+| GND | GND | 双向参考 | 必须共地 |
+| 3V3 | 3V3 | 供电/电平 | 3.3V |
+
+当前仍只接第一块 CH585，第二块 CH585 后续接同一组 SCK/MOSI，另加独立 CS/MISO。
+
+当前主状态帧为 16B `KEY_STATE` 短帧：
+
+```text
+offset  size  field
+0       1     magic       0xD7
+1       1     type        0x11 = KEY_STATE
+2       1     source_id   0
+3       1     seq
+4       1     ack_seq     request-only 模式下暂不使用
+5       1     flags       bit7=READY
+6       8     down_bits   64 键 0/1 状态
+14      2     crc16       CRC-CCITT over bytes 0..13
+```
+
+新增低频调试帧也是 16B，不改变 H417 每次 SPI 读取长度：
+
+```text
+offset  size  field
+0       1     magic       0xD7
+1       1     type        0x12 = KEY_DEBUG
+2       1     source_id   0
+3       1     seq
+4       1     key_id
+5       1     flags       bit7=READY, bit0=down, bit1=rt_armed
+6       2     raw_adc
+8       2     filtered_adc
+10      2     position_pm 0..1000
+12      2     peak_pm
+14      2     crc16       CRC-CCITT over bytes 0..13
+```
+
+CH585 测试固件当前每 8 个 `seq` 插入 1 个 `KEY_DEBUG`，其余帧仍然发送 `KEY_STATE/down_bits[8]`。H417 收到 `KEY_DEBUG` 后不会刷新 64 键状态，只更新调试快照并通过 USB CDC 输出：
+
+```text
+KD n=3 seq=24 k=3 raw=3001 filt=2410 pos=705 peak=1000 down=1 rt=0
+```
+
+含义：
+
+- `KD`：CH585 内部算法调试帧。
+- `n`：H417 已收到的 debug 帧数。
+- `seq`：CH585 帧序号。
+- `k`：当前上报的 key id。
+- `raw/filt/pos/peak`：CH585 本地算法状态。
+- `down/rt`：CH585 已经判断出的按键状态和 RT armed 状态。
+
+当前主要观测端口：
+
+```text
+COM5 = H417 USBFS CDC，看 KS / SS / TR / KD
+COM4 = WCH-Link SERIAL，看 rtthread heartbeat 和详细 dump
+```
+
+本次新增的 CH585 测试工程仍在仓库外：
+
+```text
+F:\嵌赛\CH585M_SPI_SLAVE_TEST
+```
+
+如果团队希望这部分也进入 PR，需要后续把 CH585 测试工程整理进 `hardware/firmware/` 或约定的固件目录。
+
 ## 当前结论
 
 当前链路已经跑通：

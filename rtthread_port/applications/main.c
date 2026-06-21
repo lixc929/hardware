@@ -195,6 +195,45 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
 }
 #endif
 
+#if APP_ENABLE_USB_TEST && APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_STATUS_REPORT
+static void usb_scan_debug_report_poll(rt_uint32_t heartbeat)
+{
+    static rt_uint32_t last_debug_frames;
+    ch585_scan_debug_status_t debug;
+    char line[128];
+    int used;
+
+    (void)heartbeat;
+
+    if (ch585_spi_scan_source0_debug_status(&debug) != 0)
+    {
+        return;
+    }
+
+    if (debug.frames == last_debug_frames)
+    {
+        return;
+    }
+    last_debug_frames = debug.frames;
+
+    used = rt_snprintf(line, sizeof(line),
+                       "KD n=%u seq=%u k=%u raw=%u filt=%u pos=%u peak=%u down=%u rt=%u\r\n",
+                       (unsigned int)debug.frames,
+                       (unsigned int)debug.seq,
+                       (unsigned int)debug.key_id,
+                       (unsigned int)debug.raw_adc,
+                       (unsigned int)debug.filtered_adc,
+                       (unsigned int)debug.position_pm,
+                       (unsigned int)debug.peak_pm,
+                       (unsigned int)debug.is_down,
+                       (unsigned int)debug.rt_armed);
+    if ((used > 0) && ((rt_size_t)used < sizeof(line)))
+    {
+        (void)ch32h417_usb_cdc_write(line, (rt_uint32_t)used);
+    }
+}
+#endif
+
 #if APP_ENABLE_USB_TEST && APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SPI_TRAIN_REPORT
 static void usb_spi_train_report_poll(rt_uint32_t heartbeat)
 {
@@ -364,6 +403,7 @@ int main(void)
         ch32h417_dual_cdc_poll();
 #if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_STATUS_REPORT
         usb_scan_status_report_poll(heartbeat);
+        usb_scan_debug_report_poll(heartbeat);
 #endif
 #if APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SPI_TRAIN_REPORT
         usb_spi_train_report_poll(heartbeat);

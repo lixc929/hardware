@@ -22,6 +22,7 @@
 #define CH585_SCAN_CMD_GET_STATE     0x01U
 #define CH585_SCAN_SHORT_FRAME_MAGIC 0xD7U
 #define CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE 0x11U
+#define CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG 0x12U
 #define CH585_SCAN_SHORT_CMD_MAGIC   0xA7U
 #define CH585_SCAN_SOURCE_COUNT      2U
 #define CH585_SCAN_KEYS_PER_SOURCE   64U
@@ -43,6 +44,8 @@
 #define CH585_SCAN_SHORT_FLAG_SYNC_LOST (1U << 3)
 #define CH585_SCAN_SHORT_FLAG_CMD_ERROR (1U << 4)
 #define CH585_SCAN_SHORT_FLAG_READY     (1U << 7)
+#define CH585_SCAN_SHORT_DEBUG_FLAG_DOWN     (1U << 0)
+#define CH585_SCAN_SHORT_DEBUG_FLAG_RT_ARMED (1U << 1)
 
 typedef struct __attribute__((packed))
 {
@@ -85,6 +88,21 @@ typedef struct __attribute__((packed))
 typedef struct __attribute__((packed))
 {
     uint8_t magic;
+    uint8_t type;
+    uint8_t source_id;
+    uint8_t seq;
+    uint8_t key_id;
+    uint8_t flags;
+    uint16_t raw_adc;
+    uint16_t filtered_adc;
+    uint16_t position_pm;
+    uint16_t peak_pm;
+    uint16_t crc16;
+} ch585_scan_debug_short_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t magic;
     uint8_t cmd;
     uint8_t host_seq;
     uint8_t ack_seq;
@@ -119,11 +137,27 @@ typedef struct
     uint8_t have_seq;
 } ch585_scan_source_stats_t;
 
+typedef struct
+{
+    uint32_t frames;
+    uint8_t valid;
+    uint8_t seq;
+    uint8_t key_id;
+    uint8_t flags;
+    uint8_t is_down;
+    uint8_t rt_armed;
+    uint16_t raw_adc;
+    uint16_t filtered_adc;
+    uint16_t position_pm;
+    uint16_t peak_pm;
+} ch585_scan_debug_status_t;
+
 int ch585_spi_scan_init(void);
 void ch585_spi_scan_poll_once(void);
 void ch585_spi_scan_dump_stats(void);
 const uint16_t *ch585_spi_scan_raw(void);
 const ch585_scan_source_stats_t *ch585_spi_scan_source_stats(uint8_t source_id);
+int ch585_spi_scan_source0_debug_status(ch585_scan_debug_status_t *out);
 uint32_t ch585_spi_scan_source0_sck_khz_x10(void);
 uint16_t ch585_spi_scan_source0_prescaler(void);
 uint8_t ch585_spi_scan_source0_hsrx(void);

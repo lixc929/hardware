@@ -164,6 +164,7 @@ typedef struct
     ch585_scan_source_stats_t source[CH585_SCAN_SOURCE_COUNT];
     uint32_t poll_count;
     uint16_t raw[CH585_SCAN_TOTAL_KEYS];
+    ch585_scan_debug_status_t source0_debug;
     uint8_t source0_head[8];
     uint8_t source0_tail[8];
     uint8_t source0_req_rx[4];
@@ -586,6 +587,24 @@ static uint16_t ch585_scan_flags_from_short(uint8_t flags)
 
     return out;
 }
+
+static int ch585_scan_short_type_is_supported(uint8_t type)
+{
+    return ((type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE) ||
+            (type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG)) ? 1 : 0;
+}
+
+static uint16_t ch585_scan_debug_flags_for_stats(uint8_t flags)
+{
+    uint16_t out = 0U;
+
+    if ((flags & CH585_SCAN_SHORT_FLAG_READY) != 0U)
+    {
+        out |= CH585_SCAN_FLAG_READY;
+    }
+
+    return out;
+}
 #endif
 
 static int ch585_scan_fetch_source(uint8_t source_id, ch585_scan_frame_v1_t *frame)
@@ -866,7 +885,7 @@ static int ch585_scan_frame_is_valid(const ch585_scan_frame_v1_t *frame)
 
 #if APP_CH585_SPI_WIRE_SHORT
     if ((frame->magic != CH585_SCAN_SHORT_FRAME_MAGIC) ||
-        (frame->type != CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE) ||
+        (ch585_scan_short_type_is_supported(frame->type) == 0) ||
         (frame->source_id != 0U))
     {
         return 0;
@@ -917,8 +936,8 @@ static int ch585_scan_find_frame_in_stream(const uint8_t *stream,
 #if APP_CH585_SPI_WIRE_SHORT
         if ((ch585_bitstream_read_byte(stream, bit_start) !=
              (uint8_t)CH585_SCAN_SHORT_FRAME_MAGIC) ||
-            (ch585_bitstream_read_byte(stream, bit_start + 8U) !=
-             (uint8_t)CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE))
+            (ch585_scan_short_type_is_supported(
+                 ch585_bitstream_read_byte(stream, bit_start + 8U)) == 0))
         {
             continue;
         }
@@ -981,14 +1000,14 @@ static int ch585_scan_try_first_bit_repair(const uint8_t *stream, ch585_scan_fra
 #if APP_CH585_SPI_WIRE_SHORT
     if (((frame_bytes[0] & 0x7FU) ==
          ((uint8_t)CH585_SCAN_SHORT_FRAME_MAGIC & 0x7FU)) &&
-        (frame_bytes[1] == (uint8_t)CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE))
+        (ch585_scan_short_type_is_supported(frame_bytes[1]) != 0))
     {
         frame_bytes[0] = (uint8_t)CH585_SCAN_SHORT_FRAME_MAGIC;
         g_scan.source0_first_bit_repair_rx_crc = frame->crc16;
         expected_crc = ch585_spi_scan_crc16((const uint8_t *)frame,
                                             (uint16_t)offsetof(ch585_scan_frame_v1_t, crc16));
         g_scan.source0_first_bit_repair_expected_crc = expected_crc;
-        if ((frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE) &&
+        if ((ch585_scan_short_type_is_supported(frame->type) != 0) &&
             (frame->source_id == 0U) &&
             (frame->crc16 == expected_crc))
         {
@@ -2214,6 +2233,27 @@ static void ch585_scan_mark_resync_if_source0(uint8_t source_id)
     }
 }
 
+#if APP_CH585_SPI_WIRE_SHORT
+static void ch585_scan_store_source0_debug(const ch585_scan_frame_v1_t *frame)
+{
+    const ch585_scan_debug_short_t *debug = (const ch585_scan_debug_short_t *)frame;
+
+    g_scan.source0_debug.frames++;
+    g_scan.source0_debug.valid = 1U;
+    g_scan.source0_debug.seq = debug->seq;
+    g_scan.source0_debug.key_id = debug->key_id;
+    g_scan.source0_debug.flags = debug->flags;
+    g_scan.source0_debug.is_down =
+        ((debug->flags & CH585_SCAN_SHORT_DEBUG_FLAG_DOWN) != 0U) ? 1U : 0U;
+    g_scan.source0_debug.rt_armed =
+        ((debug->flags & CH585_SCAN_SHORT_DEBUG_FLAG_RT_ARMED) != 0U) ? 1U : 0U;
+    g_scan.source0_debug.raw_adc = debug->raw_adc;
+    g_scan.source0_debug.filtered_adc = debug->filtered_adc;
+    g_scan.source0_debug.position_pm = debug->position_pm;
+    g_scan.source0_debug.peak_pm = debug->peak_pm;
+}
+#endif
+
 static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_frame_v1_t *frame)
 {
     ch585_scan_source_stats_t *stats;
@@ -2244,7 +2284,7 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
         return -1;
     }
 
-    if (frame->type != CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE)
+    if (ch585_scan_short_type_is_supported(frame->type) == 0)
     {
         stats->version_errors++;
         ch585_scan_mark_resync_if_source0(expected_source);
@@ -2311,7 +2351,8 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
 
 #if APP_CH585_SPI_WIRE_SHORT
 #if !APP_CH585_SPI_REQUEST_ONLY_SHORT
-    if ((expected_source == 0U) &&
+    if ((frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE) &&
+        (expected_source == 0U) &&
         (frame->ack_seq != (uint8_t)g_scan.source0_accept_ack_seq))
     {
         g_scan.source0_ack_errors++;
@@ -2321,7 +2362,9 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
 #endif
 
     frame_seq = frame->seq;
-    frame_flags = ch585_scan_flags_from_short(frame->flags);
+    frame_flags = (frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG) ?
+                  ch585_scan_debug_flags_for_stats(frame->flags) :
+                  ch585_scan_flags_from_short(frame->flags);
 #else
     if ((expected_source == 0U) && (frame->ack_seq != g_scan.source0_accept_ack_seq))
     {
@@ -2351,6 +2394,17 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     stats->have_seq = 1U;
     stats->frames_ok++;
     ch585_scan_record_flags(stats, frame_flags);
+
+#if APP_CH585_SPI_WIRE_SHORT
+    if (frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG)
+    {
+        if (expected_source == 0U)
+        {
+            ch585_scan_store_source0_debug(frame);
+        }
+        return 0;
+    }
+#endif
 
     for (i = 0; i < CH585_SCAN_KEYS_PER_SOURCE; i++)
     {
@@ -2477,6 +2531,20 @@ void ch585_spi_scan_dump_stats(void)
                    (unsigned int)stats->last_seq);
     }
 
+    if (g_scan.source0_debug.valid != 0U)
+    {
+        rt_kprintf("  src0 debug frames=%u seq=%u key=%u raw=%u filt=%u pos=%u peak=%u down=%u rt=%u\r\n",
+                   (unsigned int)g_scan.source0_debug.frames,
+                   (unsigned int)g_scan.source0_debug.seq,
+                   (unsigned int)g_scan.source0_debug.key_id,
+                   (unsigned int)g_scan.source0_debug.raw_adc,
+                   (unsigned int)g_scan.source0_debug.filtered_adc,
+                   (unsigned int)g_scan.source0_debug.position_pm,
+                   (unsigned int)g_scan.source0_debug.peak_pm,
+                   (unsigned int)g_scan.source0_debug.is_down,
+                   (unsigned int)g_scan.source0_debug.rt_armed);
+    }
+
     rt_kprintf("  src0 req_rx=%02x %02x %02x %02x head=%02x %02x %02x %02x %02x %02x %02x %02x bad=%02x %02x %02x %02x %02x %02x %02x %02x miso=%u/%u/%u sync=%u@%u.%u repair=%u\r\n",
                (unsigned int)g_scan.source0_req_rx[0],
                (unsigned int)g_scan.source0_req_rx[1],
@@ -2600,6 +2668,17 @@ const ch585_scan_source_stats_t *ch585_spi_scan_source_stats(uint8_t source_id)
     }
 
     return &g_scan.source[source_id];
+}
+
+int ch585_spi_scan_source0_debug_status(ch585_scan_debug_status_t *out)
+{
+    if (out == RT_NULL)
+    {
+        return -1;
+    }
+
+    memcpy(out, &g_scan.source0_debug, sizeof(*out));
+    return (out->valid != 0U) ? 0 : -1;
 }
 
 uint32_t ch585_spi_scan_source0_sck_khz_x10(void)
