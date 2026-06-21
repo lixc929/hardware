@@ -90,6 +90,24 @@ sim_adc_value(seq, key)
 
 当前只有前 4 个 key 生成模拟运动，其余 key 保持松开，用于在 H417 `KS` 日志里清楚观察状态变化。
 
+当前代码已经把本地算法参数集中到每键配置结构中，后续可以由 H417 通过低频配置命令下发：
+
+```text
+released_adc
+pressed_adc
+min_adc / max_adc
+press_position
+release_position
+rt_press_delta
+rt_release_delta
+filter_shift
+rt_enable
+valid
+global_key_id
+```
+
+正常高速帧仍然只发送 `down_bits[8]`，这些配置和 raw/position 只用于 CH585 本地判键、调试和后续校准。
+
 ## 编译产物
 
 编译：

@@ -36,13 +36,14 @@
 #define CH585_SCAN_REQ1              'R'
 #define CH585_SIM_RELEASED_ADC       1000U
 #define CH585_SIM_PRESSED_ADC        3000U
-#define CH585_KEY_PRESS_ADC          2200U
-#define CH585_KEY_RELEASE_ADC        1800U
-#define CH585_KEY_FILTER_SHIFT       2U
-#define CH585_KEY_PRESS_POSITION_PM  500U
-#define CH585_KEY_RELEASE_POSITION_PM 350U
-#define CH585_KEY_RT_PRESS_DELTA_PM  80U
-#define CH585_KEY_RT_RELEASE_DELTA_PM 80U
+#define CH585_KEY_DEFAULT_MIN_ADC    0U
+#define CH585_KEY_DEFAULT_MAX_ADC    4095U
+#define CH585_KEY_DEFAULT_FILTER_SHIFT 2U
+#define CH585_KEY_DEFAULT_PRESS_POSITION_PM 500U
+#define CH585_KEY_DEFAULT_RELEASE_POSITION_PM 350U
+#define CH585_KEY_DEFAULT_RT_PRESS_DELTA_PM 80U
+#define CH585_KEY_DEFAULT_RT_RELEASE_DELTA_PM 80U
+#define CH585_KEY_INVALID_GLOBAL_ID  0xFFFFU
 #define CH585_SIM_ACTIVE_KEYS        4U
 #define CH585_SIM_PERIOD_FRAMES      32U
 
@@ -169,6 +170,22 @@ typedef ch585_scan_frame_v2_t ch585_scan_wire_frame_t;
 typedef ch585_scan_cmd_legacy_t ch585_scan_wire_cmd_t;
 #endif
 
+typedef struct
+{
+    uint16_t released_adc;
+    uint16_t pressed_adc;
+    uint16_t min_adc;
+    uint16_t max_adc;
+    uint16_t press_position_pm;
+    uint16_t release_position_pm;
+    uint16_t rt_press_delta_pm;
+    uint16_t rt_release_delta_pm;
+    uint16_t global_key_id;
+    uint8_t filter_shift;
+    uint8_t rt_enable;
+    uint8_t valid;
+} ch585_key_config_t;
+
 #if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
 static __attribute__((aligned(4))) ch585_scan_wire_frame_t g_frame;
 #endif
@@ -179,6 +196,7 @@ static __attribute__((aligned(4))) ch585_scan_wire_cmd_t g_cmd;
 #if CH585_MODE_PIPELINE_SHORT
 static __attribute__((aligned(4))) uint8_t g_pipe_rx[sizeof(ch585_scan_wire_frame_t)];
 #endif
+static ch585_key_config_t g_key_config[CH585_SCAN_KEYS_PER_SOURCE];
 static uint8_t g_key_down[CH585_SCAN_KEYS_PER_SOURCE];
 static uint8_t g_key_filter_valid[CH585_SCAN_KEYS_PER_SOURCE];
 static uint8_t g_key_rt_armed[CH585_SCAN_KEYS_PER_SOURCE];
@@ -212,6 +230,50 @@ static uint16_t scan_crc16(const uint8_t *data, uint16_t len)
     }
 
     return crc;
+}
+
+static void key_config_init_defaults(void)
+{
+    uint8_t i;
+
+    for (i = 0; i < CH585_SCAN_KEYS_PER_SOURCE; i++)
+    {
+        ch585_key_config_t *cfg = &g_key_config[i];
+
+        cfg->released_adc = CH585_SIM_RELEASED_ADC;
+        cfg->pressed_adc = CH585_SIM_PRESSED_ADC;
+        cfg->min_adc = CH585_KEY_DEFAULT_MIN_ADC;
+        cfg->max_adc = CH585_KEY_DEFAULT_MAX_ADC;
+        cfg->press_position_pm = CH585_KEY_DEFAULT_PRESS_POSITION_PM;
+        cfg->release_position_pm = CH585_KEY_DEFAULT_RELEASE_POSITION_PM;
+        cfg->rt_press_delta_pm = CH585_KEY_DEFAULT_RT_PRESS_DELTA_PM;
+        cfg->rt_release_delta_pm = CH585_KEY_DEFAULT_RT_RELEASE_DELTA_PM;
+        cfg->global_key_id = (uint16_t)i;
+        cfg->filter_shift = CH585_KEY_DEFAULT_FILTER_SHIFT;
+#if CH585_KEY_ENABLE_RAPID_TRIGGER
+        cfg->rt_enable = 1U;
+#else
+        cfg->rt_enable = 0U;
+#endif
+        cfg->valid = 1U;
+
+        g_key_raw_adc[i] = cfg->released_adc;
+        g_key_filtered_adc[i] = cfg->released_adc;
+        g_key_filtered_q8[i] = (uint32_t)cfg->released_adc << 8;
+        g_key_position_pm[i] = 0U;
+        g_key_peak_pm[i] = 0U;
+        g_key_valley_pm[i] = 0U;
+    }
+}
+
+static const ch585_key_config_t *key_config(uint8_t key_id)
+{
+    if (key_id >= CH585_SCAN_KEYS_PER_SOURCE)
+    {
+        return &g_key_config[0];
+    }
+
+    return &g_key_config[key_id];
 }
 
 static uint16_t sim_clamp_adc(int32_t value)
@@ -261,11 +323,19 @@ static uint16_t sim_key_position_pm(uint16_t seq, uint8_t key_id)
 
 static uint16_t sim_adc_value(uint16_t seq, uint8_t key_id)
 {
+    const ch585_key_config_t *cfg = key_config(key_id);
     uint16_t position_pm = sim_key_position_pm(seq, key_id);
-    uint16_t span = CH585_SIM_PRESSED_ADC - CH585_SIM_RELEASED_ADC;
+    int32_t span = (int32_t)cfg->pressed_adc - (int32_t)cfg->released_adc;
     int16_t noise = (int16_t)(((seq * 17U) + ((uint16_t)key_id * 13U)) & 7U) - 3;
-    int32_t value = (int32_t)CH585_SIM_RELEASED_ADC +
-                    (((int32_t)span * (int32_t)position_pm) / 1000) +
+    int32_t value;
+
+    if (cfg->valid == 0U)
+    {
+        return cfg->released_adc;
+    }
+
+    value = (int32_t)cfg->released_adc +
+                    ((span * (int32_t)position_pm) / 1000) +
                     (int32_t)noise;
 
     return sim_clamp_adc(value);
@@ -276,17 +346,18 @@ static void key_state_set_bit(ch585_scan_wire_frame_t *frame, uint8_t key_id)
     frame->down_bits[key_id >> 3] |= (uint8_t)(1U << (key_id & 7U));
 }
 
-static uint16_t key_adc_to_position_pm(uint16_t adc)
+static uint16_t key_adc_to_position_pm(uint8_t key_id, uint16_t adc)
 {
-    int32_t span = (int32_t)CH585_SIM_PRESSED_ADC - (int32_t)CH585_SIM_RELEASED_ADC;
+    const ch585_key_config_t *cfg = key_config(key_id);
+    int32_t span = (int32_t)cfg->pressed_adc - (int32_t)cfg->released_adc;
     int32_t pos;
 
-    if (span == 0)
+    if ((cfg->valid == 0U) || (span == 0))
     {
         return 0U;
     }
 
-    pos = (((int32_t)adc - (int32_t)CH585_SIM_RELEASED_ADC) * 1000) / span;
+    pos = (((int32_t)adc - (int32_t)cfg->released_adc) * 1000) / span;
     if (pos < 0)
     {
         return 0U;
@@ -302,8 +373,15 @@ static uint16_t key_adc_to_position_pm(uint16_t adc)
 
 static uint16_t key_filter_adc(uint8_t key_id, uint16_t adc)
 {
+    const ch585_key_config_t *cfg = key_config(key_id);
     uint32_t raw_q8 = (uint32_t)adc << 8;
     uint32_t filtered;
+    uint8_t shift = cfg->filter_shift;
+
+    if (shift > 15U)
+    {
+        shift = 15U;
+    }
 
     if (g_key_filter_valid[key_id] == 0U)
     {
@@ -315,11 +393,11 @@ static uint16_t key_filter_adc(uint8_t key_id, uint16_t adc)
         filtered = g_key_filtered_q8[key_id];
         if (raw_q8 >= filtered)
         {
-            filtered += (raw_q8 - filtered) >> CH585_KEY_FILTER_SHIFT;
+            filtered += (raw_q8 - filtered) >> shift;
         }
         else
         {
-            filtered -= (filtered - raw_q8) >> CH585_KEY_FILTER_SHIFT;
+            filtered -= (filtered - raw_q8) >> shift;
         }
         g_key_filtered_q8[key_id] = filtered;
     }
@@ -345,8 +423,19 @@ static void key_release(uint8_t key_id, uint16_t position_pm, uint8_t rt_armed)
 
 static void update_key_state_from_adc(uint8_t key_id, uint16_t adc)
 {
+    const ch585_key_config_t *cfg = key_config(key_id);
     uint16_t filtered_adc = key_filter_adc(key_id, adc);
-    uint16_t position_pm = key_adc_to_position_pm(filtered_adc);
+    uint16_t position_pm = key_adc_to_position_pm(key_id, filtered_adc);
+
+    if (cfg->valid == 0U)
+    {
+        g_key_down[key_id] = 0U;
+        g_key_rt_armed[key_id] = 0U;
+        g_key_raw_adc[key_id] = adc;
+        g_key_filtered_adc[key_id] = filtered_adc;
+        g_key_position_pm[key_id] = 0U;
+        return;
+    }
 
     g_key_raw_adc[key_id] = adc;
     g_key_filtered_adc[key_id] = filtered_adc;
@@ -360,16 +449,17 @@ static void update_key_state_from_adc(uint8_t key_id, uint16_t adc)
         }
 
 #if CH585_KEY_ENABLE_RAPID_TRIGGER
-        if ((g_key_rt_armed[key_id] != 0U) &&
+        if ((cfg->rt_enable != 0U) &&
+            (g_key_rt_armed[key_id] != 0U) &&
             (position_pm >=
-             (uint16_t)(g_key_valley_pm[key_id] + CH585_KEY_RT_PRESS_DELTA_PM)))
+             (uint16_t)(g_key_valley_pm[key_id] + cfg->rt_press_delta_pm)))
         {
             key_press(key_id, position_pm);
             return;
         }
 #endif
 
-        if (position_pm >= CH585_KEY_PRESS_POSITION_PM)
+        if (position_pm >= cfg->press_position_pm)
         {
             key_press(key_id, position_pm);
         }
@@ -382,14 +472,15 @@ static void update_key_state_from_adc(uint8_t key_id, uint16_t adc)
         }
 
 #if CH585_KEY_ENABLE_RAPID_TRIGGER
-        if ((position_pm + CH585_KEY_RT_RELEASE_DELTA_PM) <= g_key_peak_pm[key_id])
+        if ((cfg->rt_enable != 0U) &&
+            ((position_pm + cfg->rt_release_delta_pm) <= g_key_peak_pm[key_id]))
         {
             key_release(key_id, position_pm, 1U);
             return;
         }
 #endif
 
-        if (position_pm <= CH585_KEY_RELEASE_POSITION_PM)
+        if (position_pm <= cfg->release_position_pm)
         {
             key_release(key_id, position_pm, 0U);
         }
@@ -753,6 +844,7 @@ int main(void)
 
     HSECFG_Capacitance(HSECap_18p);
     SetSysClock(SYSCLK_FREQ);
+    key_config_init_defaults();
 
     spi0_slave_pin_init();
     SPI0_SlaveInit();
