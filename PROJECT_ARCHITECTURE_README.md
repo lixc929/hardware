@@ -180,7 +180,8 @@ USBHS HID / Vendor HID
 - H417 与一块 CH585M 的硬件 SPI2 + GPIO CS 链路已跑通。
 - 当前只实接一块 CH585M，第二块 CH585M 仍未接入；H417 侧 source1 仍可用假数据路径补齐调试。
 - 当前 SPI 自动训练显示约 16 MHz 稳定，19.2 MHz 附近已经明显不稳，24 MHz 以上基本失败。
-- 40 MHz 以上目标还没有达成。继续提速需要结合示波器/逻辑分析仪看 SCK/MISO 建立时间、线长、地线、驱动能力、采样相位、共享 MISO 三态等硬件问题。
+- 杜邦线阶段暂时把约 16 MHz 作为稳定工程档位，不继续强行拉到 40 MHz+。40 MHz 以上目标等 PCB 到后，再结合示波器/逻辑分析仪看 SCK/MISO 建立时间、线长、地线、驱动能力、采样相位、共享 MISO 三态等硬件问题。
+- `../CH585M_SPI_SLAVE_TEST` 已改为默认从模拟 ADC 进入 CH585 本地键轴算法，再输出 `down_bits[8]` 短帧；`CH585_FAST_SIM_FRAME=1` 仍可回退到旧 pattern。
 - `firmware/ch585_frontend/ads7948.*` 和 `ch585_ads7948_mux_scan.*` 已有独立原型代码，但尚未接入 CH585 正式工程。
 - `firmware/common/magnetic_key_engine.*` 可作为磁轴算法参考/仿真原型，但当前产品架构里最终磁轴算法应迁移到 CH585 侧。
 
@@ -206,10 +207,11 @@ CH585 侧：
 
 ## 9. 后续优先级
 
-1. 在 CH585 上接入 ADS7948 单通道读取，先确认固定通道 raw code 稳定。
-2. 接入 CH585 的 MUX 扫描，确认 64 键 raw code 和 lane/key map。
-3. 把磁轴算法迁移到 CH585：滤波、标定、position、普通触发、RT、滞回。
-4. CH585 正常帧继续发短帧 key state，raw/position 改为低频调试帧。
-5. H417 保持硬件 SPI2 + GPIO CS，先完成单 CH585 稳定，再接第二块 CH585。
-6. 用 USBHS Vendor HID/HID 替代长期 CDC 调试输出。
-7. 如果必须达到 40 MHz+ SPI，先做电气测量和硬件链路优化，再决定是否改引脚、改板级连接或增加缓冲。
+1. 用 `../CH585M_SPI_SLAVE_TEST` 验证模拟 ADC -> CH585 本地算法 -> `down_bits[8]` -> H417 USBHS `KS/SS` 这条链路。
+2. 在 CH585 上接入 ADS7948 单通道读取，先确认固定通道 raw code 稳定。
+3. 接入 CH585 的 MUX 扫描，确认 64 键 raw code 和 lane/key map。
+4. 把完整磁轴算法迁移到 CH585：滤波、标定、position、普通触发、RT、滞回。
+5. CH585 正常帧继续发短帧 key state，raw/position 改为低频调试帧。
+6. H417 保持硬件 SPI2 + GPIO CS，先完成单 CH585 稳定，再接第二块 CH585。
+7. 用 USBHS Vendor HID/HID 替代长期 CDC 调试输出。
+8. PCB 到板后再重新做 40 MHz+ SPI 提速、电气测量和两块 CH585 共享 MISO 验证。
