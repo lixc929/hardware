@@ -42,6 +42,8 @@ If COM5 does not appear, check `rtthread_port/Makefile` first.
 
 - [ADS7948 / MUX / magnetic notes](ads7948_mux_magnetic_notes.md)
 - [CH585 SPI slave test firmware](../../firmware/ch585_spi_slave_test/README.md)
+- [CH585 legacy BLE / RF snapshots](../../firmware/ch585_legacy/README.md)
+- [CH585 BLE / 2.4G RF archive notes](archive/ch585_ble_rf/README.md)
 - [Archive of older SPI / USB experiments](archive/)
 
 ## Archive Policy

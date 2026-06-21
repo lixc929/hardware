@@ -6,6 +6,7 @@ This directory is the main documentation entry point for the hardware repository
 
 - [H417 + CH585 bring-up index](bringup/README.md)
 - [CH585 SPI slave test firmware](../firmware/ch585_spi_slave_test/README.md)
+- [CH585 legacy BLE / RF snapshots](../firmware/ch585_legacy/README.md)
 - [Current H417 + CH585 debug status](bringup/h417_ch585_current_debug.md)
 - [Next steps](bringup/h417_ch585_next_steps.md)
 - [CH32H417 dual-core flashing guide](bringup/h417_mounriver_dual_core_flash.md)
@@ -34,4 +35,4 @@ This directory is the main documentation entry point for the hardware repository
 
 ## Archive
 
-Older H417 / CH585 bring-up stage notes are kept in [bringup/archive](bringup/archive/). They are useful for debugging history, but the current source of truth is the bring-up index and current status documents above.
+Older H417 / CH585 bring-up stage notes are kept in [bringup/archive](bringup/archive/). CH585 BLE / 2.4G RF historical notes are collected in [bringup/archive/ch585_ble_rf](bringup/archive/ch585_ble_rf/). They are useful for debugging history, but the current source of truth is the bring-up index and current status documents above.
