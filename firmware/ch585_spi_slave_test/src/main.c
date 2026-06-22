@@ -108,6 +108,10 @@
 #define CH585_USE_REQUEST_ONLY_SHORT CH585_USE_SHORT_FRAME
 #endif
 
+#ifndef CH585_REQUEST_ONLY_CAPTURE_CMD
+#define CH585_REQUEST_ONLY_CAPTURE_CMD 1
+#endif
+
 #define CH585_MODE_PIPELINE_SHORT \
     (CH585_USE_PIPELINE_SHORT && CH585_USE_SHORT_FRAME)
 #define CH585_MODE_REQUEST_ONLY_SHORT \
@@ -210,12 +214,17 @@ typedef struct
 #if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
 static __attribute__((aligned(4))) ch585_scan_wire_frame_t g_frame;
 #endif
+#if CH585_MODE_REQUEST_ONLY_SHORT
 static __attribute__((aligned(4))) ch585_scan_wire_frame_t g_frame_pingpong[2];
-#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
+#endif
+#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_REQUEST_ONLY_SHORT || CH585_MODE_COMMAND_RESPONSE
 static __attribute__((aligned(4))) ch585_scan_wire_cmd_t g_cmd;
 #endif
 #if CH585_MODE_PIPELINE_SHORT
 static __attribute__((aligned(4))) uint8_t g_pipe_rx[sizeof(ch585_scan_wire_frame_t)];
+#endif
+#if CH585_MODE_REQUEST_ONLY_SHORT && CH585_REQUEST_ONLY_CAPTURE_CMD && CH585_USE_SPI0_SLAVE_DMA
+static __attribute__((aligned(4))) uint8_t g_req_rx[sizeof(ch585_scan_wire_frame_t)];
 #endif
 static ch585_key_config_t g_key_config[CH585_SCAN_KEYS_PER_SOURCE];
 static uint8_t g_key_down[CH585_SCAN_KEYS_PER_SOURCE];
@@ -297,7 +306,7 @@ static const ch585_key_config_t *key_config(uint8_t key_id)
     return &g_key_config[key_id];
 }
 
-#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
+#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_REQUEST_ONLY_SHORT || CH585_MODE_COMMAND_RESPONSE
 static void key_runtime_reset(uint8_t key_id)
 {
     const ch585_key_config_t *cfg = key_config(key_id);
@@ -655,7 +664,7 @@ static void update_all_key_states(uint16_t seq)
     }
 }
 
-#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
+#if CH585_MODE_PIPELINE_SHORT || CH585_MODE_REQUEST_ONLY_SHORT || CH585_MODE_COMMAND_RESPONSE
 static uint8_t scan_cmd_is_valid(const ch585_scan_wire_cmd_t *cmd)
 {
     uint16_t expected_crc;
@@ -737,7 +746,7 @@ static void build_scan_frame_into(ch585_scan_wire_frame_t *frame,
                               (uint16_t)offsetof(ch585_scan_wire_frame_t, crc16));
 }
 
-#if CH585_USE_SHORT_FRAME
+#if CH585_USE_SHORT_FRAME && CH585_MODE_REQUEST_ONLY_SHORT
 static void build_debug_frame_into(ch585_scan_wire_frame_t *frame,
                                    uint16_t seq)
 {
@@ -779,12 +788,13 @@ static void build_debug_frame_into(ch585_scan_wire_frame_t *frame,
 }
 #endif
 
+#if CH585_USE_SHORT_FRAME
+#if CH585_MODE_REQUEST_ONLY_SHORT
 static void build_scan_or_debug_frame_into(ch585_scan_wire_frame_t *frame,
                                            uint16_t seq,
                                            uint16_t flags,
                                            uint16_t ack_seq)
 {
-#if CH585_USE_SHORT_FRAME
 #if CH585_DEBUG_FRAME_INTERVAL != 0
     if ((CH585_DEBUG_FRAME_INTERVAL != 0U) &&
         (seq != 0U) &&
@@ -796,10 +806,11 @@ static void build_scan_or_debug_frame_into(ch585_scan_wire_frame_t *frame,
         return;
     }
 #endif
-#endif
 
     build_scan_frame_into(frame, seq, flags, ack_seq);
 }
+#endif
+#endif
 
 #if CH585_MODE_PIPELINE_SHORT || CH585_MODE_COMMAND_RESPONSE
 static void build_scan_frame(uint16_t seq, uint16_t flags, uint16_t ack_seq)
@@ -863,7 +874,8 @@ static void spi0_slave_dma_trans_arm(uint8_t *pbuf, uint16_t len)
     R32_SPI0_DMA_BEG = (uint32_t)pbuf;
     R32_SPI0_DMA_END = (uint32_t)(pbuf + len);
     R16_SPI0_TOTAL_CNT = len;
-    R8_SPI0_INT_FLAG = RB_SPI_IF_CNT_END | RB_SPI_IF_DMA_END;
+    R8_SPI0_INT_FLAG = RB_SPI_IF_CNT_END | RB_SPI_IF_DMA_END |
+                       RB_SPI_IF_BYTE_END | RB_SPI_IF_FIFO_OV;
     R8_SPI0_CTRL_CFG |= RB_SPI_DMA_ENABLE;
 }
 
@@ -879,6 +891,7 @@ static void spi0_slave_dma_recv_arm(uint8_t *pbuf, uint16_t len)
 }
 #endif
 
+#if CH585_MODE_COMMAND_RESPONSE || (CH585_MODE_REQUEST_ONLY_SHORT && !CH585_REQUEST_ONLY_CAPTURE_CMD)
 static void spi0_slave_dma_wait_done(void)
 {
     while ((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
@@ -886,6 +899,52 @@ static void spi0_slave_dma_wait_done(void)
     }
     R8_SPI0_CTRL_CFG &= ~RB_SPI_DMA_ENABLE;
 }
+#endif
+
+#if CH585_MODE_REQUEST_ONLY_SHORT && CH585_REQUEST_ONLY_CAPTURE_CMD && CH585_USE_SPI0_SLAVE_DMA
+static void spi0_slave_dma_wait_done_capture(uint8_t *rx, uint16_t len)
+{
+    uint16_t rxi = 0U;
+
+    if (rx != NULL)
+    {
+        memset(rx, 0, len);
+    }
+
+    while ((R8_SPI0_INT_FLAG & RB_SPI_IF_CNT_END) == 0U)
+    {
+        if ((R8_SPI0_INT_FLAG & RB_SPI_IF_BYTE_END) != 0U)
+        {
+            if ((rx != NULL) && (rxi < len))
+            {
+                rx[rxi] = R8_SPI0_BUFFER;
+                rxi++;
+            }
+            else
+            {
+                (void)R8_SPI0_BUFFER;
+            }
+            R8_SPI0_INT_FLAG = RB_SPI_IF_BYTE_END;
+        }
+    }
+
+    while ((R8_SPI0_INT_FLAG & RB_SPI_IF_BYTE_END) != 0U)
+    {
+        if ((rx != NULL) && (rxi < len))
+        {
+            rx[rxi] = R8_SPI0_BUFFER;
+            rxi++;
+        }
+        else
+        {
+            (void)R8_SPI0_BUFFER;
+        }
+        R8_SPI0_INT_FLAG = RB_SPI_IF_BYTE_END;
+    }
+
+    R8_SPI0_CTRL_CFG &= ~RB_SPI_DMA_ENABLE;
+}
+#endif
 #endif
 
 static void spi0_wait_cs_high(void)
@@ -1032,6 +1091,8 @@ int main(void)
     }
 #elif CH585_USE_REQUEST_ONLY_SHORT && CH585_USE_SHORT_FRAME
     uint8_t tx_index = 0U;
+    uint16_t next_ack_seq = 0xFFFFU;
+    uint16_t next_frame_flags = CH585_SCAN_FLAG_READY;
 
     (void)ack_host_seq;
     (void)frame_flags;
@@ -1042,8 +1103,8 @@ int main(void)
 #if !CH585_STATIC_FRAME_TEST
     build_scan_or_debug_frame_into(&g_frame_pingpong[1],
                                    (uint16_t)(seq + 1U),
-                                   CH585_SCAN_FLAG_READY,
-                                   0xFFFFU);
+                                   next_frame_flags,
+                                   next_ack_seq);
 #endif
 
     while (1)
@@ -1057,18 +1118,33 @@ int main(void)
 #if CH585_USE_SPI0_SLAVE_DMA
         spi0_slave_dma_trans_arm((uint8_t *)tx_frame, (uint16_t)sizeof(*tx_frame));
         spi0_wait_cs_low();
-#if !CH585_STATIC_FRAME_TEST
-        build_scan_or_debug_frame_into(next_frame,
-                                       (uint16_t)(seq + 1U),
-                                       CH585_SCAN_FLAG_READY,
-                                       0xFFFFU);
-#endif
+#if CH585_REQUEST_ONLY_CAPTURE_CMD
+        spi0_slave_dma_wait_done_capture(g_req_rx, (uint16_t)sizeof(g_req_rx));
+#else
         spi0_slave_dma_wait_done();
+#endif
 #else
         spi0_wait_cs_low();
         SPI0_SlaveTrans((uint8_t *)tx_frame, (uint16_t)sizeof(*tx_frame));
 #endif
         spi0_wait_cs_high();
+#if !CH585_STATIC_FRAME_TEST
+        next_ack_seq = 0xFFFFU;
+        next_frame_flags = CH585_SCAN_FLAG_READY;
+#if CH585_REQUEST_ONLY_CAPTURE_CMD && CH585_USE_SPI0_SLAVE_DMA
+        memset(&g_cmd, 0, sizeof(g_cmd));
+        memcpy(&g_cmd, g_req_rx, sizeof(g_cmd));
+        if (scan_cmd_is_valid(&g_cmd) != 0U)
+        {
+            next_ack_seq = g_cmd.host_seq;
+            next_frame_flags |= scan_cmd_apply(&g_cmd);
+        }
+#endif
+        build_scan_or_debug_frame_into(next_frame,
+                                       (uint16_t)(seq + 1U),
+                                       next_frame_flags,
+                                       next_ack_seq);
+#endif
 #if !CH585_STATIC_FRAME_TEST
         seq++;
         tx_index ^= 1U;

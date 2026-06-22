@@ -63,7 +63,7 @@ extern uint32_t HCLKClock;
 #endif
 
 #ifndef APP_CH585_SPI_REQUEST_ONLY_SHORT
-#define APP_CH585_SPI_REQUEST_ONLY_SHORT APP_CH585_SPI_WIRE_SHORT
+#define APP_CH585_SPI_REQUEST_ONLY_SHORT 0
 #endif
 
 #ifndef APP_CH585_SPI_DMA_BACKEND
@@ -1886,6 +1886,8 @@ static int ch585_scan_fetch_source0_hw_spi2_pipeline(ch585_scan_frame_v1_t *fram
 #if APP_CH585_SPI_REQUEST_ONLY_SHORT && APP_CH585_SPI_WIRE_SHORT
 static int ch585_scan_fetch_source0_hw_spi2_request_only(ch585_scan_frame_v1_t *frame)
 {
+    uint16_t expected_ack;
+
     if ((frame == RT_NULL) || (g_scan.source0_spi2_ready == 0U))
     {
         return -1;
@@ -1899,8 +1901,12 @@ static int ch585_scan_fetch_source0_hw_spi2_request_only(ch585_scan_frame_v1_t *
             return -1;
         }
         g_scan.source0_need_resync = 0U;
+        g_scan.source0_pipeline_primed = 0U;
         ch585_cycle_delay_us(APP_CH585_SPI_RESYNC_TO_CMD_US);
     }
+
+    expected_ack = (g_scan.source0_pipeline_primed != 0U) ?
+                   g_scan.source0_pipeline_ack_seq : 0x00FFU;
 
     memset(g_source0_spi2_tx, 0xFF, sizeof(g_source0_spi2_tx));
     ch585_hw_spi2_prepare_cmd();
@@ -1911,8 +1917,15 @@ static int ch585_scan_fetch_source0_hw_spi2_request_only(ch585_scan_frame_v1_t *
         return -1;
     }
 
-    g_scan.source0_accept_ack_seq = 0xFFFFU;
-    return ch585_scan_decode_source0_capture(frame);
+    g_scan.source0_accept_ack_seq = expected_ack;
+    if (ch585_scan_decode_source0_capture(frame) != 0)
+    {
+        return -1;
+    }
+
+    g_scan.source0_pipeline_ack_seq = (uint8_t)g_scan.source0_host_seq;
+    g_scan.source0_pipeline_primed = 1U;
+    return 0;
 }
 #endif
 
@@ -2469,7 +2482,6 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     }
 
 #if APP_CH585_SPI_WIRE_SHORT
-#if !APP_CH585_SPI_REQUEST_ONLY_SHORT
     if ((frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_STATE) &&
         (expected_source == 0U) &&
         (frame->ack_seq != (uint8_t)g_scan.source0_accept_ack_seq))
@@ -2478,7 +2490,6 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
         ch585_scan_mark_resync_if_source0(expected_source);
         return -1;
     }
-#endif
 
     frame_seq = frame->seq;
     frame_flags = (frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG) ?
@@ -2835,6 +2846,21 @@ uint16_t ch585_spi_scan_source0_train_errors(void)
 uint16_t ch585_spi_scan_source0_train_frames(void)
 {
     return g_scan.source0_train_frames;
+}
+
+uint32_t ch585_spi_scan_source0_cmd_sent(void)
+{
+    return g_scan.source0_cmd_sent;
+}
+
+uint32_t ch585_spi_scan_source0_ack_errors(void)
+{
+    return g_scan.source0_ack_errors;
+}
+
+uint16_t ch585_spi_scan_source0_host_seq(void)
+{
+    return g_scan.source0_host_seq;
 }
 
 uint8_t ch585_spi_scan_source0_train_candidate_count(void)

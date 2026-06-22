@@ -249,6 +249,15 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
     }
 
     used = rt_snprintf(line, sizeof(line),
+                       "SC sent=%u ackerr=%u host=%u\r\n",
+                       (unsigned int)ch585_spi_scan_source0_cmd_sent(),
+                       (unsigned int)ch585_spi_scan_source0_ack_errors(),
+                       (unsigned int)ch585_spi_scan_source0_host_seq());
+    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+        (void)usb_cdc_write_line(line, used);
+    }
+
+    used = rt_snprintf(line, sizeof(line),
                        "SR r0=%u r1=%u r63=%u r64=%u\r\n",
                        (unsigned int)raw[0],
                        (unsigned int)raw[1],
