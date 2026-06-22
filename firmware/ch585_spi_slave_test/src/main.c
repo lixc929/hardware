@@ -37,6 +37,9 @@
 #define CH585_SCAN_SHORT_FLAG_CMD_ERROR (1U << 4)
 #define CH585_SCAN_SHORT_DEBUG_FLAG_DOWN     (1U << 0)
 #define CH585_SCAN_SHORT_DEBUG_FLAG_RT_ARMED (1U << 1)
+#define CH585_SHORT_DIAG_VALID_FLAG  (1U << 7)
+#define CH585_SHORT_DIAG_CMD_ERROR_FLAG (1U << 6)
+#define CH585_SHORT_DIAG_CMD_MASK    0x0FU
 #define CH585_SCAN_REQ0              'K'
 #define CH585_SCAN_REQ1              'R'
 #define CH585_SCAN_CFG_RELEASED_ADC       0x01U
@@ -110,6 +113,10 @@
 
 #ifndef CH585_REQUEST_ONLY_CAPTURE_CMD
 #define CH585_REQUEST_ONLY_CAPTURE_CMD 1
+#endif
+
+#ifndef CH585_SHORT_DIAG_IN_DOWN_BITS
+#define CH585_SHORT_DIAG_IN_DOWN_BITS 1
 #endif
 
 #define CH585_MODE_PIPELINE_SHORT \
@@ -236,6 +243,23 @@ static uint32_t g_key_filtered_q8[CH585_SCAN_KEYS_PER_SOURCE];
 static uint16_t g_key_position_pm[CH585_SCAN_KEYS_PER_SOURCE];
 static uint16_t g_key_peak_pm[CH585_SCAN_KEYS_PER_SOURCE];
 static uint16_t g_key_valley_pm[CH585_SCAN_KEYS_PER_SOURCE];
+static uint8_t g_last_cmd_valid;
+static uint8_t g_last_cmd_id;
+static uint8_t g_last_cmd_host_seq;
+static uint8_t g_last_cmd_error;
+static uint8_t g_invalid_cmd_count;
+static uint8_t g_last_cmd_invalid_reason;
+static uint8_t g_last_cmd_raw_magic;
+static uint8_t g_last_cmd_raw_cmd;
+static uint8_t g_last_cmd_raw_host_seq;
+static uint8_t g_last_cmd_raw_ack_seq;
+static uint8_t g_bad_cmd_raw_magic;
+static uint8_t g_bad_cmd_raw_cmd;
+static uint8_t g_bad_cmd_raw_host_seq;
+static uint8_t g_bad_cmd_raw_ack_seq;
+static uint8_t g_bad_cmd_invalid_reason;
+static uint16_t g_last_cmd_rx_crc;
+static uint16_t g_last_cmd_expected_crc;
 
 static uint16_t scan_crc16(const uint8_t *data, uint16_t len)
 {
@@ -669,33 +693,53 @@ static uint8_t scan_cmd_is_valid(const ch585_scan_wire_cmd_t *cmd)
 {
     uint16_t expected_crc;
 
+    g_last_cmd_rx_crc = (cmd != NULL) ? cmd->crc16 : 0U;
+    g_last_cmd_expected_crc = 0U;
+    g_last_cmd_invalid_reason = 0U;
+    g_last_cmd_raw_magic = (cmd != NULL) ? cmd->magic : 0U;
+    g_last_cmd_raw_cmd = (cmd != NULL) ? cmd->cmd : 0U;
+    g_last_cmd_raw_host_seq = (cmd != NULL) ? cmd->host_seq : 0U;
+    g_last_cmd_raw_ack_seq = (cmd != NULL) ? cmd->ack_seq : 0U;
+
 #if CH585_USE_SHORT_FRAME
     if (cmd->magic != CH585_SCAN_SHORT_CMD_MAGIC)
     {
+        g_last_cmd_invalid_reason = 1U;
         return 0U;
     }
     if (scan_cmd_id_is_supported(cmd->cmd) == 0U)
     {
+        g_last_cmd_invalid_reason = 2U;
         return 0U;
     }
 #else
     if (cmd->magic != CH585_SCAN_CMD_MAGIC)
     {
+        g_last_cmd_invalid_reason = 1U;
         return 0U;
     }
     if (cmd->version != CH585_SCAN_FRAME_VERSION)
     {
+        g_last_cmd_invalid_reason = 2U;
         return 0U;
     }
     if (scan_cmd_id_is_supported(cmd->cmd) == 0U)
     {
+        g_last_cmd_invalid_reason = 2U;
         return 0U;
     }
 #endif
 
     expected_crc = scan_crc16((const uint8_t *)cmd,
                               (uint16_t)offsetof(ch585_scan_wire_cmd_t, crc16));
-    return (cmd->crc16 == expected_crc) ? 1U : 0U;
+    g_last_cmd_expected_crc = expected_crc;
+    if (cmd->crc16 != expected_crc)
+    {
+        g_last_cmd_invalid_reason = 3U;
+        return 0U;
+    }
+
+    return 1U;
 }
 #endif
 
@@ -740,6 +784,19 @@ static void build_scan_frame_into(ch585_scan_wire_frame_t *frame,
             key_state_set_bit(frame, i);
         }
     }
+#endif
+
+#if CH585_USE_SHORT_FRAME && CH585_SHORT_DIAG_IN_DOWN_BITS
+    frame->down_bits[0] = g_bad_cmd_invalid_reason;
+    frame->down_bits[1] = g_invalid_cmd_count;
+    frame->down_bits[2] = g_bad_cmd_raw_magic;
+    frame->down_bits[3] = g_bad_cmd_raw_cmd;
+    frame->down_bits[4] = g_bad_cmd_raw_host_seq;
+    frame->down_bits[5] = g_bad_cmd_raw_ack_seq;
+    frame->down_bits[6] = (uint8_t)((g_last_cmd_id & CH585_SHORT_DIAG_CMD_MASK) |
+                                    ((g_last_cmd_valid != 0U) ? CH585_SHORT_DIAG_VALID_FLAG : 0U) |
+                                    ((g_last_cmd_error != 0U) ? CH585_SHORT_DIAG_CMD_ERROR_FLAG : 0U));
+    frame->down_bits[7] = g_last_cmd_host_seq;
 #endif
 
     frame->crc16 = scan_crc16((const uint8_t *)frame,
@@ -1180,9 +1237,23 @@ int main(void)
         {
             ack_host_seq = g_cmd.host_seq;
             frame_flags |= scan_cmd_apply(&g_cmd);
+            g_last_cmd_valid = 1U;
+            g_last_cmd_id = g_cmd.cmd;
+            g_last_cmd_host_seq = g_cmd.host_seq;
+            g_last_cmd_error = ((frame_flags & CH585_SCAN_FLAG_CMD_ERROR) != 0U) ? 1U : 0U;
         }
         else
         {
+            g_last_cmd_valid = 0U;
+            g_last_cmd_id = g_cmd.cmd;
+            g_last_cmd_host_seq = g_cmd.host_seq;
+            g_last_cmd_error = 1U;
+            g_bad_cmd_raw_magic = g_cmd.magic;
+            g_bad_cmd_raw_cmd = g_cmd.cmd;
+            g_bad_cmd_raw_host_seq = g_cmd.host_seq;
+            g_bad_cmd_raw_ack_seq = g_cmd.ack_seq;
+            g_bad_cmd_invalid_reason = g_last_cmd_invalid_reason;
+            g_invalid_cmd_count++;
             continue;
         }
 

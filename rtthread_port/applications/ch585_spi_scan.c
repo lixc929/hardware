@@ -47,7 +47,7 @@ extern uint32_t HCLKClock;
 #endif
 
 #ifndef APP_CH585_SPI_CMD_TO_DATA_US
-#define APP_CH585_SPI_CMD_TO_DATA_US 100U
+#define APP_CH585_SPI_CMD_TO_DATA_US 1000U
 #endif
 
 #ifndef APP_CH585_SPI_RESYNC_TO_CMD_US
@@ -79,7 +79,7 @@ extern uint32_t HCLKClock;
 #endif
 
 #ifndef APP_CH585_SPI_HW_SPI2_HIGHSPEED
-#define APP_CH585_SPI_HW_SPI2_HIGHSPEED 2
+#define APP_CH585_SPI_HW_SPI2_HIGHSPEED 0
 #endif
 
 #ifndef APP_CH585_SPI_AUTO_TRAIN
@@ -159,6 +159,14 @@ extern uint32_t HCLKClock;
 #define APP_CH585_SPI_DMA_USE_OUTDR 1
 #endif
 
+#ifndef APP_CH585_SPI_SHORT_DIAG_IN_DOWN_BITS
+#define APP_CH585_SPI_SHORT_DIAG_IN_DOWN_BITS 1
+#endif
+
+#define CH585_SHORT_DIAG_VALID_FLAG     (1U << 7)
+#define CH585_SHORT_DIAG_CMD_ERROR_FLAG (1U << 6)
+#define CH585_SHORT_DIAG_CMD_MASK       0x0FU
+
 typedef struct
 {
     uint8_t pending;
@@ -179,6 +187,7 @@ typedef struct
     uint8_t source0_head[8];
     uint8_t source0_tail[8];
     uint8_t source0_req_rx[4];
+    uint8_t source0_cmd_rx[4];
     uint8_t source0_miso_idle[3];
     uint8_t source0_sync_found;
     uint8_t source0_sync_bit;
@@ -222,6 +231,24 @@ typedef struct
     ch585_scan_pending_cmd_t source0_pending_cmd;
     uint32_t source0_cmd_queued;
     uint32_t source0_cmd_sent;
+    uint32_t source0_debug_cmd_sent;
+    uint32_t source0_calibrate_cmd_sent;
+    uint8_t source0_last_cmd;
+    uint8_t source0_last_frame_type;
+    uint8_t source0_last_frame_seq;
+    uint8_t source0_last_resync_reason;
+    uint8_t source0_slave_diag_cmd;
+    uint8_t source0_slave_diag_host_seq;
+    uint8_t source0_slave_diag_valid;
+    uint8_t source0_slave_diag_cmd_error;
+    uint8_t source0_slave_diag_invalid_count;
+    uint8_t source0_slave_diag_invalid_reason;
+    uint8_t source0_slave_diag_raw_magic;
+    uint8_t source0_slave_diag_raw_cmd;
+    uint8_t source0_slave_diag_raw_host_seq;
+    uint8_t source0_slave_diag_raw_ack_seq;
+    uint16_t source0_slave_diag_rx_crc;
+    uint16_t source0_slave_diag_expected_crc;
     uint32_t source0_cmd_runs;
     uint32_t source0_cmd_timeouts;
     uint32_t source0_ack_errors;
@@ -646,6 +673,11 @@ static int ch585_scan_queue_source0_cmd(uint8_t cmd,
         (ch585_scan_param_id_is_valid(param_id) == 0))
     {
         return -1;
+    }
+
+    if (pending->pending != 0U)
+    {
+        return -2;
     }
 
     pending->cmd = cmd;
@@ -1302,6 +1334,15 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
 #if APP_CH585_SPI_HW_SPI2_GPIO_CS
     GPIO_ResetBits(GPIOB, GPIO_Pin_12);
 #endif
+    if (APP_CH585_SPI_CS_SETUP_MS != 0U)
+    {
+        rt_thread_mdelay(APP_CH585_SPI_CS_SETUP_MS);
+    }
+    else
+    {
+        ch585_soft_spi_delay();
+        ch585_soft_spi_delay();
+    }
 
     for (i = 0U; i < (uint16_t)sizeof(ch585_scan_cmd_v1_t); i++)
     {
@@ -1344,6 +1385,10 @@ static int ch585_hw_spi2_cmd_xfer(const ch585_scan_cmd_v1_t *cmd)
     GPIO_SetBits(GPIOB, GPIO_Pin_12);
 #endif
     SPI_Cmd(SPI2, DISABLE);
+    for (i = 0U; (i < sizeof(g_scan.source0_cmd_rx)) && (i < sizeof(g_source0_spi2_cmd_rx)); i++)
+    {
+        g_scan.source0_cmd_rx[i] = rx[i];
+    }
     g_scan.source0_cmd_runs++;
     return 0;
 
@@ -1479,6 +1524,16 @@ static void ch585_hw_spi2_prepare_cmd(void)
         ch585_spi_scan_crc16((const uint8_t *)&g_source0_spi2_cmd_tx,
                              (uint16_t)offsetof(ch585_scan_cmd_v1_t, crc16));
     g_scan.source0_cmd_sent++;
+    g_scan.source0_last_cmd = cmd.cmd;
+    if (cmd.cmd == CH585_SCAN_CMD_GET_DEBUG)
+    {
+        g_scan.source0_debug_cmd_sent++;
+    }
+    else if ((cmd.cmd == CH585_SCAN_CMD_CALIBRATE_KEY) ||
+             (cmd.cmd == CH585_SCAN_CMD_CALIBRATE_ALL))
+    {
+        g_scan.source0_calibrate_cmd_sent++;
+    }
 }
 
 static void ch585_hw_spi2_prepare_pipeline_tx(void)
@@ -1949,10 +2004,6 @@ static int ch585_scan_fetch_source0_hw_spi2(ch585_scan_frame_v1_t *frame)
         (APP_CH585_SPI_RESYNC_EVERY_POLL != 0U))
     {
         g_scan.source0_resync_runs++;
-        if (ch585_hw_spi2_drain_xfer((uint16_t)APP_CH585_SPI_SOURCE0_CAPTURE_BYTES) != 0)
-        {
-            return -1;
-        }
         g_scan.source0_need_resync = 0U;
 #if APP_CH585_SPI_CMD_TO_DATA_MS
         rt_thread_mdelay(APP_CH585_SPI_CMD_TO_DATA_MS);
@@ -2308,10 +2359,7 @@ static int ch585_scan_fetch_real_or_fake(uint8_t source_id, ch585_scan_frame_v1_
             return 0;
         }
 #else
-        if (ch585_scan_fetch_source0_hw_spi2(frame) == 0)
-        {
-            return 0;
-        }
+        return ch585_scan_fetch_source0_hw_spi2(frame);
 #endif
 #endif
 #if APP_CH585_SPI_DMA_BACKEND
@@ -2365,6 +2413,15 @@ static void ch585_scan_mark_resync_if_source0(uint8_t source_id)
     }
 }
 
+static void ch585_scan_mark_resync_reason_if_source0(uint8_t source_id, uint8_t reason)
+{
+    if (source_id == 0U)
+    {
+        g_scan.source0_last_resync_reason = reason;
+    }
+    ch585_scan_mark_resync_if_source0(source_id);
+}
+
 #if APP_CH585_SPI_WIRE_SHORT
 static void ch585_scan_store_source0_debug(const ch585_scan_frame_v1_t *frame)
 {
@@ -2412,14 +2469,14 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
             memcpy(g_scan.source0_bad_head, frame, sizeof(g_scan.source0_bad_head));
         }
         stats->magic_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 1U);
         return -1;
     }
 
     if (ch585_scan_short_type_is_supported(frame->type) == 0)
     {
         stats->version_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 2U);
         return -1;
     }
 
@@ -2427,7 +2484,7 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     if (frame->source_id != expected_source)
     {
         stats->source_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 3U);
         return -1;
     }
 #else
@@ -2438,21 +2495,21 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
             memcpy(g_scan.source0_bad_head, frame, sizeof(g_scan.source0_bad_head));
         }
         stats->magic_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 1U);
         return -1;
     }
 
     if (frame->version != CH585_SCAN_FRAME_VERSION)
     {
         stats->version_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 2U);
         return -1;
     }
 
     if (frame->type != CH585_SCAN_FRAME_TYPE_KEY_STATE)
     {
         stats->version_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 2U);
         return -1;
     }
 
@@ -2460,14 +2517,14 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     if (frame->source_id != expected_source)
     {
         stats->source_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 3U);
         return -1;
     }
 
     if (frame->key_count != CH585_SCAN_KEYS_PER_SOURCE)
     {
         stats->length_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 4U);
         return -1;
     }
 #endif
@@ -2477,7 +2534,7 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     if (frame->crc16 != expected_crc)
     {
         stats->crc_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 5U);
         return -1;
     }
 
@@ -2487,11 +2544,16 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
         (frame->ack_seq != (uint8_t)g_scan.source0_accept_ack_seq))
     {
         g_scan.source0_ack_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 6U);
         return -1;
     }
 
     frame_seq = frame->seq;
+    if (expected_source == 0U)
+    {
+        g_scan.source0_last_frame_type = frame->type;
+        g_scan.source0_last_frame_seq = frame->seq;
+    }
     frame_flags = (frame->type == CH585_SCAN_SHORT_FRAME_TYPE_KEY_DEBUG) ?
                   ch585_scan_debug_flags_for_stats(frame->flags) :
                   ch585_scan_flags_from_short(frame->flags);
@@ -2499,7 +2561,7 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
     if ((expected_source == 0U) && (frame->ack_seq != g_scan.source0_accept_ack_seq))
     {
         g_scan.source0_ack_errors++;
-        ch585_scan_mark_resync_if_source0(expected_source);
+        ch585_scan_mark_resync_reason_if_source0(expected_source, 6U);
         return -1;
     }
 
@@ -2534,11 +2596,42 @@ static int ch585_scan_accept_frame(uint8_t expected_source, const ch585_scan_fra
         }
         return 0;
     }
+
+#if APP_CH585_SPI_SHORT_DIAG_IN_DOWN_BITS
+    if (expected_source == 0U)
+    {
+        uint8_t diag = frame->down_bits[6];
+
+        g_scan.source0_slave_diag_invalid_reason = frame->down_bits[0];
+        g_scan.source0_slave_diag_invalid_count = frame->down_bits[1];
+        g_scan.source0_slave_diag_raw_magic = frame->down_bits[2];
+        g_scan.source0_slave_diag_raw_cmd = frame->down_bits[3];
+        g_scan.source0_slave_diag_raw_host_seq = frame->down_bits[4];
+        g_scan.source0_slave_diag_raw_ack_seq = frame->down_bits[5];
+        g_scan.source0_slave_diag_rx_crc = 0U;
+        g_scan.source0_slave_diag_expected_crc = 0U;
+        g_scan.source0_slave_diag_cmd = (uint8_t)(diag & CH585_SHORT_DIAG_CMD_MASK);
+        g_scan.source0_slave_diag_valid =
+            ((diag & CH585_SHORT_DIAG_VALID_FLAG) != 0U) ? 1U : 0U;
+        g_scan.source0_slave_diag_cmd_error =
+            ((diag & CH585_SHORT_DIAG_CMD_ERROR_FLAG) != 0U) ? 1U : 0U;
+        g_scan.source0_slave_diag_host_seq = frame->down_bits[7];
+    }
+#endif
 #endif
 
     for (i = 0; i < CH585_SCAN_KEYS_PER_SOURCE; i++)
     {
+#if APP_CH585_SPI_WIRE_SHORT && APP_CH585_SPI_SHORT_DIAG_IN_DOWN_BITS
+        if (expected_source == 0U)
+        {
+            is_down = 0U;
+        }
+        else
+#endif
+        {
         is_down = (uint8_t)((frame->down_bits[i >> 3] >> (i & 7U)) & 1U);
+        }
         g_scan.raw[expected_base + i] =
             (is_down != 0U) ? CH585_SCAN_PRESSED_ADC : CH585_SCAN_RELEASED_ADC;
     }
@@ -2675,11 +2768,15 @@ void ch585_spi_scan_dump_stats(void)
                    (unsigned int)g_scan.source0_debug.rt_armed);
     }
 
-    rt_kprintf("  src0 req_rx=%02x %02x %02x %02x head=%02x %02x %02x %02x %02x %02x %02x %02x bad=%02x %02x %02x %02x %02x %02x %02x %02x miso=%u/%u/%u sync=%u@%u.%u repair=%u\r\n",
+    rt_kprintf("  src0 req_rx=%02x %02x %02x %02x cmdrx=%02x %02x %02x %02x head=%02x %02x %02x %02x %02x %02x %02x %02x bad=%02x %02x %02x %02x %02x %02x %02x %02x miso=%u/%u/%u sync=%u@%u.%u repair=%u\r\n",
                (unsigned int)g_scan.source0_req_rx[0],
                (unsigned int)g_scan.source0_req_rx[1],
                (unsigned int)g_scan.source0_req_rx[2],
                (unsigned int)g_scan.source0_req_rx[3],
+               (unsigned int)g_scan.source0_cmd_rx[0],
+               (unsigned int)g_scan.source0_cmd_rx[1],
+               (unsigned int)g_scan.source0_cmd_rx[2],
+               (unsigned int)g_scan.source0_cmd_rx[3],
                (unsigned int)g_scan.source0_head[0],
                (unsigned int)g_scan.source0_head[1],
                (unsigned int)g_scan.source0_head[2],
@@ -2856,6 +2953,96 @@ uint32_t ch585_spi_scan_source0_cmd_queued(void)
 uint32_t ch585_spi_scan_source0_cmd_sent(void)
 {
     return g_scan.source0_cmd_sent;
+}
+
+uint32_t ch585_spi_scan_source0_debug_cmd_sent(void)
+{
+    return g_scan.source0_debug_cmd_sent;
+}
+
+uint32_t ch585_spi_scan_source0_calibrate_cmd_sent(void)
+{
+    return g_scan.source0_calibrate_cmd_sent;
+}
+
+uint8_t ch585_spi_scan_source0_last_cmd(void)
+{
+    return g_scan.source0_last_cmd;
+}
+
+uint8_t ch585_spi_scan_source0_last_frame_type(void)
+{
+    return g_scan.source0_last_frame_type;
+}
+
+uint8_t ch585_spi_scan_source0_last_frame_seq(void)
+{
+    return g_scan.source0_last_frame_seq;
+}
+
+uint8_t ch585_spi_scan_source0_last_resync_reason(void)
+{
+    return g_scan.source0_last_resync_reason;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_cmd(void)
+{
+    return g_scan.source0_slave_diag_cmd;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_host_seq(void)
+{
+    return g_scan.source0_slave_diag_host_seq;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_valid(void)
+{
+    return g_scan.source0_slave_diag_valid;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_cmd_error(void)
+{
+    return g_scan.source0_slave_diag_cmd_error;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_invalid_count(void)
+{
+    return g_scan.source0_slave_diag_invalid_count;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_invalid_reason(void)
+{
+    return g_scan.source0_slave_diag_invalid_reason;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_raw_magic(void)
+{
+    return g_scan.source0_slave_diag_raw_magic;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_raw_cmd(void)
+{
+    return g_scan.source0_slave_diag_raw_cmd;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_raw_host_seq(void)
+{
+    return g_scan.source0_slave_diag_raw_host_seq;
+}
+
+uint8_t ch585_spi_scan_source0_slave_diag_raw_ack_seq(void)
+{
+    return g_scan.source0_slave_diag_raw_ack_seq;
+}
+
+uint16_t ch585_spi_scan_source0_slave_diag_rx_crc(void)
+{
+    return g_scan.source0_slave_diag_rx_crc;
+}
+
+uint16_t ch585_spi_scan_source0_slave_diag_expected_crc(void)
+{
+    return g_scan.source0_slave_diag_expected_crc;
 }
 
 uint32_t ch585_spi_scan_source0_ack_errors(void)

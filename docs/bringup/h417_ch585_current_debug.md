@@ -219,6 +219,106 @@ position_pm = (filtered_adc - released_adc) * 1000
               / (pressed_adc - released_adc)
 ```
 
+## 2026-06-22 SPI speed checkpoint
+
+This section records the current reproducible H417 + one-CH585 board result.
+
+Hardware wiring under test:
+
+```text
+H417 PB12 -> CH585 PA12 / CS0
+H417 PB13 -> CH585 PA13 / SCK
+H417 PC1  -> CH585 PA14 / MOSI
+H417 PC2  <- CH585 PA15 / MISO
+GND       <-> GND
+3V3       <-> 3V3
+```
+
+Current stable baseline left on the board:
+
+```text
+APP_CH585_SPI_HW_SPI2_PRESCALER = SPI_BaudRatePrescaler_Mode4
+APP_CH585_SPI_HW_SPI2_HIGHSPEED = 0
+APP_CH585_SPI_CMD_TO_DATA_US    = 1000
+APP_CH585_SPI_CS_SETUP_MS       = 1
+Observed USBFS log: SP sck=3121.9 kHz p=0020 h=0 c=1
+```
+
+Observed comparison:
+
+```text
+Mode4, h=0: about 3.12 MHz, stable in short COM5 captures; rxbad did not grow during the final 30 s check.
+Mode3, h=0: about 6.10 MHz, rxbad slowly increased.
+Mode4, h=1: about 16.00 MHz, main link still worked, but rxbad slowly increased.
+Older Mode4, h=2: about 16.00 MHz, worse than h=1 in previous captures.
+CPHA=2: bad, reverted to CPHA=1.
+```
+
+Current interpretation:
+
+- The protocol path is alive: H417 command queue, CH585 response, USBFS CDC logs, KEY_DEBUG, and calibration test all run.
+- The clean speed on the current Dupont-wire setup is only around 3 MHz.
+- Since CS setup is already 1 ms and command-to-data delay is 1000 us, the observed errors are not likely to be simple CS setup-time violations.
+- The likely causes are signal integrity, SPI edge timing, CH585 SPI0 sampling margin, or transaction state recovery after a corrupted command.
+- Do not use the current Dupont-wire result to conclude the final PCB cannot reach a higher SPI clock.
+
+Next useful SPI work:
+
+```text
+1. Keep 3.12 MHz as the stable debug baseline.
+2. Add clearer command-transaction diagnostics: distinguish corrupted command bytes from phase-recovery/dummy-read artifacts.
+3. On PCB, retest normal divisors and high-speed modes with short traces and solid ground return.
+4. After PCB is available, target >=40 MHz again; CH585/H417 datasheet limits alone do not rule it out.
+```
+
+## 2026-06-22 USBHS HID checkpoint
+
+USBHS application-layer bring-up now has a first HID prototype in:
+
+```text
+rtthread_port/applications/usb_hs_hid_keyboard.c
+rtthread_port/applications/usb_hs_hid_keyboard.h
+```
+
+Build switches:
+
+```text
+APP_ENABLE_USB2_FS_CDC = 1   ; keep USBFS CDC as debug console
+APP_ENABLE_USB2_HS_CDC = 0   ; do not use USBHS as CDC in this profile
+APP_ENABLE_USB2_HS_HID = 1   ; use USBHS as HID keyboard + vendor HID
+```
+
+The USBHS device currently enumerates as:
+
+```text
+VID_1A86 PID_FE32
+USB Composite Device
+MI_00: HID Keyboard Device
+MI_01: HID-compliant vendor-defined device
+```
+
+Windows check result from the development PC:
+
+```text
+USB\VID_1A86&PID_FE32\2026062201                         OK
+USB\VID_1A86&PID_FE32&MI_00\...                           OK
+USB\VID_1A86&PID_FE32&MI_01\...                           OK
+HID\VID_1A86&PID_FE32&MI_00\...  HID Keyboard Device       OK
+HID\VID_1A86&PID_FE32&MI_01\...  vendor-defined HID        OK
+```
+
+Current scope:
+
+- Keyboard report is an 8-byte boot keyboard report.
+- Vendor HID report is a 64-byte in/out placeholder for future config and debug.
+- The report producer currently maps raw ADC values above `APP_USBHS_HID_DOWN_ADC` to a small HID usage table for bring-up only.
+- This is not yet the final 8K report scheduler and not yet the final keymap/config protocol.
+
+Current caveat:
+
+- When USBFS CDC is not present, COM5 logs are unavailable even though USBHS HID enumerates correctly.
+- For log-assisted debugging, keep USBFS connected or use WCH-Link serial output.
+
 当前按键判断：
 
 ```text
