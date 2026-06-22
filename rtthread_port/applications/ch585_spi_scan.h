@@ -191,6 +191,7 @@ uint8_t ch585_spi_scan_source0_cpha_edges(void);
 uint8_t ch585_spi_scan_source0_train_done(void);
 uint16_t ch585_spi_scan_source0_train_errors(void);
 uint16_t ch585_spi_scan_source0_train_frames(void);
+uint32_t ch585_spi_scan_source0_cmd_queued(void);
 uint32_t ch585_spi_scan_source0_cmd_sent(void);
 uint32_t ch585_spi_scan_source0_ack_errors(void);
 uint16_t ch585_spi_scan_source0_host_seq(void);

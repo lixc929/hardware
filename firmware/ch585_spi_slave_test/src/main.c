@@ -746,23 +746,21 @@ static void build_scan_frame_into(ch585_scan_wire_frame_t *frame,
                               (uint16_t)offsetof(ch585_scan_wire_frame_t, crc16));
 }
 
-#if CH585_USE_SHORT_FRAME && CH585_MODE_REQUEST_ONLY_SHORT
+#if CH585_USE_SHORT_FRAME && (CH585_MODE_REQUEST_ONLY_SHORT || CH585_MODE_COMMAND_RESPONSE)
 static void build_debug_frame_into(ch585_scan_wire_frame_t *frame,
-                                   uint16_t seq)
+                                   uint16_t seq,
+                                   uint8_t key_id)
 {
     ch585_scan_debug_short_t *debug = (ch585_scan_debug_short_t *)frame;
-    uint8_t key_id;
     uint8_t debug_flags = CH585_SCAN_SHORT_FLAG_READY;
 
     memset(frame, 0, sizeof(*frame));
     update_all_key_states(seq);
 
-#if CH585_DEBUG_FRAME_INTERVAL != 0
-    key_id = (uint8_t)(((uint16_t)(seq / CH585_DEBUG_FRAME_INTERVAL)) %
-                       CH585_SIM_ACTIVE_KEYS);
-#else
-    key_id = 0U;
-#endif
+    if (key_id >= CH585_SCAN_KEYS_PER_SOURCE)
+    {
+        key_id = 0U;
+    }
 
     if (g_key_down[key_id] != 0U)
     {
@@ -800,9 +798,12 @@ static void build_scan_or_debug_frame_into(ch585_scan_wire_frame_t *frame,
         (seq != 0U) &&
         ((seq % CH585_DEBUG_FRAME_INTERVAL) == 0U))
     {
+        uint8_t key_id = (uint8_t)(((uint16_t)(seq / CH585_DEBUG_FRAME_INTERVAL)) %
+                                   CH585_SIM_ACTIVE_KEYS);
+
         (void)flags;
         (void)ack_seq;
-        build_debug_frame_into(frame, seq);
+        build_debug_frame_into(frame, seq, key_id);
         return;
     }
 #endif
@@ -1185,7 +1186,15 @@ int main(void)
             continue;
         }
 
-        finish_scan_frame(frame_flags, ack_host_seq);
+        if (((frame_flags & CH585_SCAN_FLAG_CMD_ERROR) == 0U) &&
+            (g_cmd.cmd == CH585_SCAN_CMD_GET_DEBUG))
+        {
+            build_debug_frame_into(&g_frame, seq, g_cmd.target_key);
+        }
+        else
+        {
+            finish_scan_frame(frame_flags, ack_host_seq);
+        }
         spi0_slave_stream_reset();
         SetFirstData(((uint8_t *)&g_frame)[0]);
 #if CH585_USE_SPI0_SLAVE_DMA

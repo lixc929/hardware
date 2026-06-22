@@ -73,6 +73,34 @@
 #define APP_USB_SPI_TRAIN_REPORT_PERIOD_LOOPS 4
 #endif
 
+#ifndef APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS
+#define APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS 8
+#endif
+
+#ifndef APP_CH585_DEBUG_REQUEST_KEY
+#define APP_CH585_DEBUG_REQUEST_KEY 0
+#endif
+
+#ifndef APP_CH585_CONFIG_TEST_ENABLE
+#define APP_CH585_CONFIG_TEST_ENABLE 1
+#endif
+
+#ifndef APP_CH585_CONFIG_TEST_LOOP
+#define APP_CH585_CONFIG_TEST_LOOP 6
+#endif
+
+#ifndef APP_CH585_CONFIG_TEST_KEY
+#define APP_CH585_CONFIG_TEST_KEY 0
+#endif
+
+#ifndef APP_CH585_CONFIG_TEST_PARAM
+#define APP_CH585_CONFIG_TEST_PARAM CH585_SCAN_CFG_RT_ENABLE
+#endif
+
+#ifndef APP_CH585_CONFIG_TEST_VALUE
+#define APP_CH585_CONFIG_TEST_VALUE 0
+#endif
+
 #ifndef APP_USB_KEY_ENGINE_REPORT_PERIOD_LOOPS
 #define APP_USB_KEY_ENGINE_REPORT_PERIOD_LOOPS 1
 #endif
@@ -145,6 +173,49 @@ static int usb_cdc_write_line(const char *line, int len)
     }
 
     return usb_cdc_write_full(line, (rt_size_t)len);
+}
+#endif
+
+#if APP_ENABLE_CH585_SPI_SCAN
+static void ch585_config_test_poll(rt_uint32_t heartbeat)
+{
+#if APP_CH585_CONFIG_TEST_ENABLE
+    static rt_uint8_t queued;
+
+    if (queued != 0U)
+    {
+        return;
+    }
+
+    if (heartbeat < APP_CH585_CONFIG_TEST_LOOP)
+    {
+        return;
+    }
+
+    if (ch585_spi_scan_source0_queue_set_config(APP_CH585_CONFIG_TEST_KEY,
+                                                APP_CH585_CONFIG_TEST_PARAM,
+                                                APP_CH585_CONFIG_TEST_VALUE) == 0)
+    {
+        queued = 1U;
+    }
+#else
+    (void)heartbeat;
+#endif
+}
+
+static void ch585_debug_request_poll(rt_uint32_t heartbeat)
+{
+    if (APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS == 0U)
+    {
+        return;
+    }
+
+    if ((heartbeat % APP_CH585_DEBUG_REQUEST_PERIOD_LOOPS) != 2U)
+    {
+        return;
+    }
+
+    (void)ch585_spi_scan_source0_queue_get_debug(APP_CH585_DEBUG_REQUEST_KEY);
 }
 #endif
 
@@ -248,13 +319,25 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
         (void)usb_cdc_write_line(line, used);
     }
 
-    used = rt_snprintf(line, sizeof(line),
-                       "SC sent=%u ackerr=%u host=%u\r\n",
-                       (unsigned int)ch585_spi_scan_source0_cmd_sent(),
-                       (unsigned int)ch585_spi_scan_source0_ack_errors(),
-                       (unsigned int)ch585_spi_scan_source0_host_seq());
-    if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
-        (void)usb_cdc_write_line(line, used);
+    {
+        ch585_scan_debug_status_t debug;
+        uint32_t debug_frames = 0U;
+
+        if (ch585_spi_scan_source0_debug_status(&debug) == 0)
+        {
+            debug_frames = debug.frames;
+        }
+
+        used = rt_snprintf(line, sizeof(line),
+                           "SC q=%u sent=%u ackerr=%u host=%u dbg=%u\r\n",
+                           (unsigned int)ch585_spi_scan_source0_cmd_queued(),
+                           (unsigned int)ch585_spi_scan_source0_cmd_sent(),
+                           (unsigned int)ch585_spi_scan_source0_ack_errors(),
+                           (unsigned int)ch585_spi_scan_source0_host_seq(),
+                           (unsigned int)debug_frames);
+        if ((used > 0) && ((rt_size_t)used < sizeof(line))) {
+            (void)usb_cdc_write_line(line, used);
+        }
     }
 
     used = rt_snprintf(line, sizeof(line),
@@ -272,23 +355,19 @@ static void usb_scan_status_report_poll(rt_uint32_t heartbeat)
 #if APP_ENABLE_USB_TEST && APP_ENABLE_CH585_SPI_SCAN && APP_ENABLE_USB_SCAN_STATUS_REPORT
 static void usb_scan_debug_report_poll(rt_uint32_t heartbeat)
 {
-    static rt_uint32_t last_debug_frames;
     ch585_scan_debug_status_t debug;
     char line[128];
     int used;
 
-    (void)heartbeat;
+    if ((heartbeat % APP_USB_SCAN_STATUS_REPORT_PERIOD_LOOPS) != 3U)
+    {
+        return;
+    }
 
     if (ch585_spi_scan_source0_debug_status(&debug) != 0)
     {
         return;
     }
-
-    if (debug.frames == last_debug_frames)
-    {
-        return;
-    }
-    last_debug_frames = debug.frames;
 
     used = rt_snprintf(line, sizeof(line),
                        "KD n=%u seq=%u k=%u down=%u rt=%u\r\n",
@@ -472,6 +551,8 @@ int main(void)
 #if APP_ENABLE_CH585_SPI_SCAN
         rt_uint32_t scan_poll;
 
+        ch585_config_test_poll(heartbeat);
+        ch585_debug_request_poll(heartbeat);
         for (scan_poll = 0; scan_poll < APP_CH585_SPI_SCAN_POLLS_PER_LOOP; scan_poll++)
         {
             ch585_spi_scan_poll_once();

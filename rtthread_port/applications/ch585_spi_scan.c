@@ -2848,6 +2848,11 @@ uint16_t ch585_spi_scan_source0_train_frames(void)
     return g_scan.source0_train_frames;
 }
 
+uint32_t ch585_spi_scan_source0_cmd_queued(void)
+{
+    return g_scan.source0_cmd_queued;
+}
+
 uint32_t ch585_spi_scan_source0_cmd_sent(void)
 {
     return g_scan.source0_cmd_sent;
