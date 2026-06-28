@@ -14,6 +14,7 @@ LDFLAGS := $(ARCH_FLAGS) -nostartfiles -Xlinker --gc-sections --specs=nano.specs
 LIBS := -L$(SDK_ROOT)/StdPeriphDriver -lISP585 -lm
 
 INC := -Isrc
+INC += -I../ch585_frontend
 INC += -I$(SDK_ROOT)/StdPeriphDriver/inc
 INC += -I$(SDK_ROOT)/RVMSIS
 
@@ -24,16 +25,30 @@ DEFS += -DCH585_USE_SHORT_FRAME=1
 DEFS += -DCH585_USE_PIPELINE_SHORT=0
 DEFS += -DCH585_USE_REQUEST_ONLY_SHORT=0
 DEFS += -DCH585_FAST_SIM_FRAME=0
+DEFS += -DCH585_ADC_PROBE_MODE=1
+DEFS += -DCH585_ADC_PROBE_RIGHT_HALF=0
+DEFS += -DCH585_ADC_PROBE_DEBUG_KEY=21U
 DEFS += -DCH585_KEY_ENABLE_RAPID_TRIGGER=1
 DEFS += $(DEFS_EXTRA)
 
 C_SOURCES := src/main.c
+C_SOURCES += src/ch585_local_periph_test.c
+C_SOURCES += src/ch585_soft_i2c.c
+C_SOURCES += ../ch585_frontend/ads7948.c
+C_SOURCES += ../ch585_frontend/ch585_i2c_bus.c
+C_SOURCES += ../ch585_frontend/ch585_local_inputs.c
+C_SOURCES += ../ch585_frontend/ch585_power_status.c
+C_SOURCES += ../ch585_frontend/hx24lc16.c
+C_SOURCES += ../ch585_frontend/max17048.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_clk.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_flash.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_gpio.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_pwr.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_spi0.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_spi1.c
 C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_sys.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_uart0.c
+C_SOURCES += $(SDK_ROOT)/StdPeriphDriver/CH58x_uart1.c
 
 ASM_SOURCES := $(SDK_ROOT)/Startup/startup_CH585.S
 LDSCRIPT := $(SDK_ROOT)/Ld/Link.ld
@@ -68,7 +83,11 @@ $(BUILD)/%.bin: $(BUILD)/%.elf
 	@"$(OBJCOPY)" -O binary "$<" "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$@' | Out-Null"
+else
 	@mkdir -p "$@"
+endif
 
 clean:
 	rm -rf "$(BUILD)"
