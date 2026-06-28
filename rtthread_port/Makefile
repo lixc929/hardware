@@ -36,10 +36,25 @@ DEFS += -DAPP_USBSS_SKIP_FOR_V3F_OFFICIAL=1
 DEFS += -DAPP_ENABLE_USB_TEST=1
 APP_ENABLE_USB2_HS_CDC ?= 0
 APP_ENABLE_USB2_FS_CDC ?= 1
-APP_ENABLE_USB2_HS_HID ?= 1
+APP_ENABLE_USB2_HS_HID ?= 0
+APP_ENABLE_USBFS_CDC_HID ?= 0
+APP_ENABLE_CH585_BLE_BRIDGE ?= 0
+APP_CH585_SPI_PCB_SOURCE0_RIGHT ?= 0
+APP_ENABLE_USB_SCAN_REPORT ?= 0
+APP_CH585_DEBUG_REQUEST_KEY ?= 21
+APP_MAIN_LOOP_DELAY_MS ?=
 DEFS += -DAPP_ENABLE_USB2_HS_CDC=$(APP_ENABLE_USB2_HS_CDC)
 DEFS += -DAPP_ENABLE_USB2_FS_CDC=$(APP_ENABLE_USB2_FS_CDC)
 DEFS += -DAPP_ENABLE_USB2_HS_HID=$(APP_ENABLE_USB2_HS_HID)
+DEFS += -DAPP_ENABLE_USBFS_CDC_HID=$(APP_ENABLE_USBFS_CDC_HID)
+DEFS += -DAPP_ENABLE_CH585_BLE_BRIDGE=$(APP_ENABLE_CH585_BLE_BRIDGE)
+DEFS += -DAPP_CH585_SPI_PCB_SOURCE0_RIGHT=$(APP_CH585_SPI_PCB_SOURCE0_RIGHT)
+DEFS += -DAPP_ENABLE_USB_SCAN_REPORT=$(APP_ENABLE_USB_SCAN_REPORT)
+DEFS += -DAPP_CH585_DEBUG_REQUEST_KEY=$(APP_CH585_DEBUG_REQUEST_KEY)
+ifneq ($(APP_MAIN_LOOP_DELAY_MS),)
+DEFS += -DAPP_MAIN_LOOP_DELAY_MS=$(APP_MAIN_LOOP_DELAY_MS)
+endif
+DEFS += $(DEFS_EXTRA)
 
 # Include paths
 INC := -I"$(PROJECT_ROOT)" -I"$(PROJECT_ROOT)/bsp" -I"$(PROJECT_ROOT)/drivers" -I"$(PROJECT_ROOT)/libcpu"
@@ -114,6 +129,8 @@ DRV_SRC += $(PROJECT_ROOT)/drivers/drv_gpio.c
 # Application
 APP_SRC := $(PROJECT_ROOT)/applications/main.c
 APP_SRC += $(PROJECT_ROOT)/applications/ch585_spi_scan.c
+APP_SRC += $(PROJECT_ROOT)/applications/keyboard_profile.c
+APP_SRC += $(PROJECT_ROOT)/applications/ch585_ble_bridge.c
 APP_SRC += $(PROJECT_ROOT)/applications/keyboard_engine.c
 APP_SRC += $(PROJECT_ROOT)/applications/usb_cdc_dual.c
 APP_SRC += $(PROJECT_ROOT)/applications/usb_hs_hid_keyboard.c
@@ -185,7 +202,11 @@ $(BUILD)/%.lst: $(ELF)
 	@$(OBJDUMP) --all-headers --demangle --disassemble -M xw "$<" > "$@"
 
 $(BUILD):
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$@' | Out-Null"
+else
 	@mkdir -p "$@"
+endif
 
 size: $(ELF)
 	@$(SIZE) "$(ELF)"
