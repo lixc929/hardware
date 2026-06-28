@@ -5,19 +5,109 @@ This folder contains the active H417 / CH585 keyboard front-end bring-up notes.
 ## Read First
 
 1. [Current debug status](h417_ch585_current_debug.md)
-2. [Next steps](h417_ch585_next_steps.md)
-3. [CH32H417 dual-core flashing guide](h417_mounriver_dual_core_flash.md)
+2. [Dual CH585 full-chain status](dual_ch585_full_chain_status.md)
+3. [Next steps](h417_ch585_next_steps.md)
+4. [CH32H417 dual-core flashing guide](h417_mounriver_dual_core_flash.md)
+5. [CH585 local peripherals bring-up](ch585_local_peripherals_bringup.md)
 
 ## Current Verified Point
+
+The newest verified PCB chain is documented in
+[Dual CH585 full-chain status](dual_ch585_full_chain_status.md):
+
+```text
+Left CH585 source0 + right CH585 source1
+  -> shared H417 SPI1 bus with PF2/PD9 GPIO CS
+  -> H417 USBFS CDC S0/S1 logs
+```
+
+Both sources have been observed with clean CRC/fetch/sequence counters at
+16 MHz. CH585 images for shared-MISO tests must use
+`CH585_SPI0_MISO_STRONG_DRIVE=0`.
 
 The current verified debug chain is:
 
 ```text
-CH585 simulated ADC / local key algorithm
+CH585 simulated ADC / local key algorithm, or ADS7948 probe mode
   -> CH585 KEY_STATE + low-rate KEY_DEBUG
-  -> H417 hardware SPI2 + GPIO CS
+  -> H417 PCB hardware SPI1 + GPIO CS
   -> H417 USBFS CDC COM5 logs
 ```
+
+Current PCB SPI wiring from the contest report:
+
+```text
+H417 PB3/SPI1_SCK  -> CH585 PA13/SPI0_SCK
+H417 PB5/SPI1_MOSI -> CH585 PA14/SPI0_MOSI
+H417 PB4/SPI1_MISO <- CH585 PA15/SPI0_MISO
+H417 PD9 GPIO CS   -> right CH585 PA12/SPI0_CS
+H417 PF2 GPIO CS   -> left CH585 PA12/SPI0_CS, held high during right-only test
+```
+
+The old dev-board SPI2 wiring remains as a compile-time fallback only.
+
+## Debug Without H417 USB
+
+If H417 USB is not connected, use CH585 UART1 as a telemetry bridge. Build
+the CH585 SPI slave firmware with:
+
+```powershell
+make DEFS_EXTRA="-DCH585_SPI_UART_TELEMETRY=1"
+```
+
+Then flash:
+
+```text
+F:\嵌赛\hardware\firmware\ch585_spi_slave_test\build\ch585m_spi_slave_test.hex
+```
+
+UART wiring:
+
+```text
+CH585 PA9 / UART1 TX -> USB-TTL RX
+CH585 PA8 / UART1 RX <- USB-TTL TX, optional
+CH585 GND            -> USB-TTL GND
+115200 8N1
+```
+
+The telemetry closes the loop through SPI:
+
+```text
+CH585 sends frame seq=N
+  -> H417 accepts it
+  -> H417 sends next command with ack_seq=N
+  -> CH585 prints ack_ok=1 over UART1
+```
+
+Useful UART lines:
+
+```text
+SP ST  ... ack_ok=... ack_miss=... sent=N host=H host_ack=N ack=1 sck=50.00MHz ...
+SP BAD ... bad command or CRC on the H417->CH585 command path
+SP KEY ... down_bits changed
+```
+
+`sck=` is returned by H417 in the short command reserved bytes. The unit on
+the wire is 10 kHz, and CH585 UART prints it as MHz. This lets us confirm the
+actual H417-selected SPI training speed without connecting H417 USB.
+
+Current stable SPI fallback mode is command-response short frame:
+
+```text
+H417: APP_CH585_SPI_REQUEST_ONLY_SHORT=0
+H417: APP_CH585_SPI_HW_SPI2_PRESCALER=SPI_BaudRatePrescaler_Mode4
+H417: APP_CH585_SPI_HW_SPI2_HIGHSPEED=2
+H417: CPHA=1Edge
+CH585: CH585_USE_REQUEST_ONLY_SHORT=0
+```
+
+This reports `sck=16.67MHz` on CH585 UART and was observed stable on the PCB
+with `cmd_bad=0`, continuous `ack=1`, and no new `ack_miss`. Higher-speed
+observations: `25.00MHz`, `20.00MHz/HSRX2`, and `20.00MHz/HSRX1` kept the
+H417->CH585 command path mostly clean but missed most CH585->H417 ACKs.
+`20.00MHz/HSRX1/CPHA2` made the command path worse. The request-only short
+path is not currently considered validated: CH585 captured `0xFF` on the
+command bytes during the first PCB test.
 
 Expected COM5 lines include:
 
@@ -41,6 +131,11 @@ If COM5 does not appear, check `rtthread_port/Makefile` first.
 ## Reference Notes
 
 - [ADS7948 / MUX / magnetic notes](ads7948_mux_magnetic_notes.md)
+- [CH585 ADS7948 single-key probe](ch585_ads7948_single_key_probe.md)
+- [Dual CH585 full-chain status](dual_ch585_full_chain_status.md)
+- [Right half to BLE bridge plan](right_half_to_ble_bridge_plan.md)
+- [CH585 2.4G 8K RF + USBHS bring-up](ch585_2g_8k_rf_usbhs_bringup.md)
+- [CH585 local peripherals bring-up](ch585_local_peripherals_bringup.md)
 - [CH585 SPI slave test firmware](../../firmware/ch585_spi_slave_test/README.md)
 - [CH585 legacy BLE / RF snapshots](../../firmware/ch585_legacy/README.md)
 - [CH585 BLE / 2.4G RF archive notes](archive/ch585_ble_rf/README.md)

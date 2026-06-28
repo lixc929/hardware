@@ -25,6 +25,7 @@ This directory is the main documentation entry point for the hardware repository
 - [Firmware update architecture](architecture/firmware_update_architecture.md)
 - [Display UI architecture](architecture/display_ui_architecture.md)
 - [Local config and profile model](architecture/local_config_and_profile_model.md)
+- [Profile configuration skeleton](architecture/profile_config_skeleton.md)
 
 ## Planning And Reports
 
