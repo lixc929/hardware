@@ -3,7 +3,7 @@
 * Author             : WCH
 * Version            : V1.0
 * Date               : 2022/03/10
-* Description        :
+* Description        : 
 *******************************************************************************/
 
 #ifndef __RF_TEST_H
@@ -45,6 +45,7 @@ typedef struct
 } testBound_t;
 
 void RFRole_Init(void);
+void RFRole_Poll(void);
 void RF_LowPower( uint32_t time);
 void RF_ProcessRx( void );
 

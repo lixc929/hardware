@@ -7,7 +7,7 @@
 #include "broadcaster.h"
 
 #define MIN_BLE_ADV_INTERVAL    160
-#define MIN_BLE_DEVICE_NAME     "CH585M_MINBLE"
+#define MIN_BLE_DEVICE_NAME     "CH585_LX_ADV1"
 
 static uint8_t g_broadcaster_task_id = INVALID_TASK_ID;
 
@@ -22,7 +22,7 @@ static uint8_t advertData[] = {
 
     0x0E,
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '5', '8', '5', 'M', '_', 'M', 'I', 'N', 'B', 'L', 'E'
+    'C', 'H', '5', '8', '5', '_', 'L', 'X', '_', 'A', 'D', 'V', '1'
 };
 
 static void Broadcaster_ProcessTMOSMsg(tmos_event_hdr_t *pMsg);

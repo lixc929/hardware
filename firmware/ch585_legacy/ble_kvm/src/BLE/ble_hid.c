@@ -27,13 +27,13 @@
 #define BLE_HID_MAX_CONN_INTERVAL     8
 #define BLE_HID_SLAVE_LATENCY         0
 #define BLE_HID_CONN_TIMEOUT          500
-#define BLE_HID_DEVICE_NAME           "CH585M_HIDBLE"
+#define BLE_HID_DEVICE_NAME           "CH585_LX_TEST"
 #define BLE_HID_IDLE_TIMEOUT_MS       60000
 #define BLE_HID_KEY_TAP_HOLD_MS       120
 #define BLE_HID_KEY_TAP_RETRY_MS      800
 #define BLE_HID_KEY_TAP_MAX_RETRY     20
 #define BLE_HID_KEY_TAP_QUEUE_SIZE    16
-#define BLE_HID_CLEAR_BONDS_ON_BOOT   FALSE
+#define BLE_HID_CLEAR_BONDS_ON_BOOT   TRUE
 
 typedef struct
 {
@@ -55,7 +55,7 @@ static uint8_t g_key_tap_queue_count = 0;
 static uint8_t scanRspData[] = {
     0x0E,
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '5', '8', '5', 'M', '_', 'H', 'I', 'D', 'B', 'L', 'E',
+    'C', 'H', '5', '8', '5', '_', 'L', 'X', '_', 'T', 'E', 'S', 'T',
 
     0x05,
     GAP_ADTYPE_SLAVE_CONN_INTERVAL_RANGE,
@@ -83,7 +83,7 @@ static uint8_t advertData[] = {
 
     0x0E,
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '5', '8', '5', 'M', '_', 'H', 'I', 'D', 'B', 'L', 'E',
+    'C', 'H', '5', '8', '5', '_', 'L', 'X', '_', 'T', 'E', 'S', 'T',
 
     0x03,
     GAP_ADTYPE_APPEARANCE,

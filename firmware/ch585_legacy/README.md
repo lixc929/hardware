@@ -62,6 +62,19 @@ If MounRiver shows invalid linked resources after importing these snapshots,
 either place `CHC585` at the expected relative location or edit the linked
 resource paths in MounRiver.
 
+## Current 2.4G 8K Stress Snapshot
+
+`rf_tx/APP/rf_keyboard_tx.c` now defaults to an 8-byte, 8000 Hz short-frame
+stress transmitter. `rf_rx_usbhs/APP/rf_receiver.c` accepts that short frame,
+prints UART statistics, and still keeps the old 25-byte keyboard frame parser as
+a fallback.
+
+Bring-up note:
+
+```text
+docs/bringup/ch585_2g_8k_rf_usbhs_bringup.md
+```
+
 ## Debug Tools
 
 - `tools/ch585/usb_cdc_console.py`

@@ -6,7 +6,7 @@
  * Description        :
  *********************************************************************************
  * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
- * Attention: This software (modified or not) and binary are used for
+ * Attention: This software (modified or not) and binary are used for 
  * microcontroller manufactured by Nanjing Qinheng Microelectronics.
  *******************************************************************************/
 
@@ -39,6 +39,7 @@ void Main_Circulation()
     while(1)
     {
         TMOS_SystemProcess();
+        RFRole_Poll();
     }
 }
 
@@ -61,12 +62,12 @@ int main(void)
     GPIOB_ModeCfg(GPIO_Pin_All, GPIO_ModeIN_PU);
 #endif
 #ifdef DEBUG
-    GPIOA_SetBits(GPIO_Pin_14);
-    GPIOPinRemap(ENABLE, RB_PIN_UART0);
-    GPIOA_ModeCfg(GPIO_Pin_15, GPIO_ModeIN_PU);
-    GPIOA_ModeCfg(GPIO_Pin_14, GPIO_ModeOut_PP_5mA);
-    UART0_DefInit();
-    UART0_BaudRateCfg( 921600 );
+    GPIOPinRemap(DISABLE, RB_PIN_UART1);
+    GPIOA_SetBits(GPIO_Pin_9);
+    GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeIN_PU);
+    GPIOA_ModeCfg(GPIO_Pin_9, GPIO_ModeOut_PP_5mA);
+    UART1_DefInit();
+    UART1_BaudRateCfg( 921600 );
 #endif
     PRINT("start.\n");
     PRINT("%s\n", VER_LIB);
