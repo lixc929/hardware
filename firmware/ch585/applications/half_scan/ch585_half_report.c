@@ -214,6 +214,8 @@ static uint8_t s_legacy_fn_enabled;
 static uint8_t s_fn_consumed[CH585_GLOBAL_DOWN_BYTES];
 static aik_host_shortcut_state_t s_host_shortcut;
 static aik_profile_shortcut_state_t s_profile_shortcut;
+static uint8_t s_mode_shortcut_active;
+static uint8_t s_mode_shortcut_consumed_mask;
 static aik_approval_control_state_t s_approval_control;
 static uint8_t s_approval_active;
 static uint8_t s_approval_selected_yes;
@@ -232,6 +234,8 @@ void ch585_half_report_reset_factory(void)
     if(s_tables_ready == 0U)
     {
         aik_profile_shortcut_reset(&s_profile_shortcut);
+        s_mode_shortcut_active = 0U;
+        s_mode_shortcut_consumed_mask = 0U;
         aik_approval_control_reset(&s_approval_control);
     }
     memcpy(s_key_outputs, s_factory_key_outputs, sizeof(s_key_outputs));
@@ -419,6 +423,42 @@ static uint8_t profile_shortcut_slot_bit(uint8_t key_id)
     }
 }
 
+static uint8_t mode_shortcut_key_bit(uint8_t key_id)
+{
+    switch(key_id)
+    {
+        case 45U:
+            return 0x01U;
+        case 44U:
+            return 0x02U;
+        case 43U:
+            return 0x04U;
+        default:
+            return 0U;
+    }
+}
+
+static uint8_t mode_shortcut_key_mask(
+    const aik_spi_half_state_v1_t *left,
+    const aik_spi_half_state_v1_t *right)
+{
+    uint8_t mask = 0U;
+
+    if(global_key_down(left, right, 45U) != 0U)
+    {
+        mask |= 0x01U;
+    }
+    if(global_key_down(left, right, 44U) != 0U)
+    {
+        mask |= 0x02U;
+    }
+    if(global_key_down(left, right, 43U) != 0U)
+    {
+        mask |= 0x04U;
+    }
+    return mask;
+}
+
 static uint8_t profile_shortcut_slot_mask(
     const aik_spi_half_state_v1_t *left,
     const aik_spi_half_state_v1_t *right)
@@ -557,6 +597,7 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     uint8_t host_shortcut_action;
     uint8_t profile_slot_mask;
     uint8_t profile_consumed_mask;
+    uint8_t mode_key_mask;
     uint8_t approval_nav_action;
     uint8_t approval_nav_consumed;
     uint8_t approval_confirm_action;
@@ -572,6 +613,20 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
     memset(nkro16, 0, AIK_NKRO_REPORT_BYTES);
     half_report_ensure_tables();
     fn_down = global_key_down(left, right, CH585_FN_LAYER_KEY);
+    mode_key_mask = mode_shortcut_key_mask(left, right);
+    s_mode_shortcut_consumed_mask &= mode_key_mask;
+    if((fn_down != 0U) &&
+       ((mode_key_mask == 0x01U) ||
+        (mode_key_mask == 0x02U) ||
+        (mode_key_mask == 0x04U)))
+    {
+        s_mode_shortcut_active = 1U;
+        s_mode_shortcut_consumed_mask |= mode_key_mask;
+    }
+    else if((fn_down == 0U) && (s_mode_shortcut_consumed_mask == 0U))
+    {
+        s_mode_shortcut_active = 0U;
+    }
     approval_nav_action = aik_approval_control_update_nav_valid(
         &s_approval_control,
         s_approval_active,
@@ -659,6 +714,13 @@ void ch585_half_report_build_nkro16(const aik_spi_half_state_v1_t *left,
             continue;
         }
         if((profile_consumed_mask & profile_shortcut_slot_bit(key_id)) != 0U)
+        {
+            continue;
+        }
+        if((s_mode_shortcut_active != 0U) &&
+           ((key_id == CH585_FN_LAYER_KEY) ||
+            ((s_mode_shortcut_consumed_mask &
+              mode_shortcut_key_bit(key_id)) != 0U)))
         {
             continue;
         }

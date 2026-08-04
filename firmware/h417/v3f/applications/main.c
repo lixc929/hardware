@@ -185,6 +185,9 @@ enum
     V3F_TRACE_RGB_EFFECT = 46,
 };
 
+static void v3f_global_key_clear_one(v3f_global_key_state_t *keys,
+                                     uint8_t key_id);
+
 typedef struct
 {
     aik_spi_half_state_v1_t frame;
@@ -500,25 +503,67 @@ static int8_t v3f_mouse_wheel_from_local_controls(
     return 0;
 }
 
-static uint8_t v3f_output_mode_update_from_keys(v3f_global_key_state_t *keys,
-                                                uint8_t current_mode)
+static uint8_t v3f_output_mode_update_from_keys(
+    v3f_global_key_state_t *keys,
+    uint8_t current_mode)
 {
+    static uint8_t consumed_mask;
+    uint8_t pressed_mask = 0U;
     uint8_t next_mode = current_mode;
 
-    if((keys != 0) &&
-       (v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U))
+    if(keys == 0)
     {
-        if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
+        return v3f_output_mode_sanitize(next_mode);
+    }
+
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F1) != 0U)
+    {
+        pressed_mask |= 0x01U;
+    }
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
+    {
+        pressed_mask |= 0x02U;
+    }
+    if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
+    {
+        pressed_mask |= 0x04U;
+    }
+
+    consumed_mask &= pressed_mask;
+
+    if(v3f_global_key_is_down(keys, V3F_FN_LAYER_KEY) != 0U)
+    {
+        if(pressed_mask == 0x01U)
         {
             next_mode = AIK_OUTPUT_MODE_USBHS;
+            consumed_mask |= 0x01U;
         }
-        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F2) != 0U)
+        else if(pressed_mask == 0x02U)
         {
             next_mode = AIK_OUTPUT_MODE_RF24;
+            consumed_mask |= 0x02U;
         }
-        else if(v3f_global_key_is_down(keys, V3F_SWITCH_KEY_F3) != 0U)
+        else if(pressed_mask == 0x04U)
         {
             next_mode = AIK_OUTPUT_MODE_BLE;
+            consumed_mask |= 0x04U;
+        }
+    }
+
+    if(consumed_mask != 0U)
+    {
+        v3f_global_key_clear_one(keys, V3F_FN_LAYER_KEY);
+        if((consumed_mask & 0x01U) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F1);
+        }
+        if((consumed_mask & 0x02U) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F2);
+        }
+        if((consumed_mask & 0x04U) != 0U)
+        {
+            v3f_global_key_clear_one(keys, V3F_SWITCH_KEY_F3);
         }
     }
 
@@ -1237,6 +1282,7 @@ int main(void)
         v3f_half_state_merge(left.valid ? &left.frame : 0,
                              right.valid ? &right.frame : 0,
                              &keys);
+        output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         approval_nav_action = aik_approval_control_update_nav_valid(
             &approval_control,
             approval_active,
@@ -1303,7 +1349,6 @@ int main(void)
         {
             v3f_profile_shortcut_consume_keys(&keys);
         }
-        output_mode = v3f_output_mode_update_from_keys(&keys, output_mode);
         if(v3f_output_mode_is_wireless(output_mode) == 0U)
         {
             wireless_consumer_delta_pending = 0;

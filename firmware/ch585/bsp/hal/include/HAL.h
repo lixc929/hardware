@@ -44,6 +44,9 @@ extern tmosTaskID halTaskID;
  */
 extern void HAL_Init(void);
 
+/* Pause periodic BLE RF calibration while RF basic mode owns the radio. */
+extern void HAL_RadioCalibrationSetEnabled(uint8_t enabled);
+
 /**
  * @brief   硬件层事务处理
  *
